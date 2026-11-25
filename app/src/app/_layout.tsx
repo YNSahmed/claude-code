@@ -82,6 +82,8 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         <Stack.Screen name="tournament/[id]" />
         <Stack.Screen name="register/[id]" options={{ animation: 'slide_from_bottom' }} />
       </Stack.Protected>
+      {/* Legal pages are open to everyone, signed in or not (they are also public web pages). */}
+      <Stack.Screen name="legal/[doc]" />
       {/* Organizer screens. The server enforces this too; hiding them is just good manners. */}
       <Stack.Protected guard={signedIn && !needsProfile && isAdmin}>
         <Stack.Screen name="admin/new" options={{ animation: 'slide_from_bottom' }} />

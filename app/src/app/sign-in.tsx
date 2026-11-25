@@ -8,6 +8,7 @@ import { ApiError, api } from '@/api/client';
 import type { User } from '@/api/types';
 import { useAuth } from '@/auth/auth-context';
 import { Logo } from '@/components/brand';
+import { LegalLinks } from '@/components/legal-links';
 import { PhoneField, phoneError } from '@/components/phone-field';
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
@@ -240,6 +241,7 @@ export default function SignInScreen() {
           Your number is only used to sign you in and is never shown to other players.
         </AppText>
       </View>
+      <LegalLinks />
     </Screen>
   );
 }

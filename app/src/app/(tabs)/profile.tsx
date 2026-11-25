@@ -6,6 +6,7 @@ import { StyleSheet, View } from 'react-native';
 import { api, errorMessage } from '@/api/client';
 import { useUpdateProfile } from '@/api/queries';
 import { useAuth } from '@/auth/auth-context';
+import { LegalLinks } from '@/components/legal-links';
 import { AppText } from '@/components/ui/app-text';
 import { Pill } from '@/components/ui/badges';
 import { Button } from '@/components/ui/button';
@@ -130,6 +131,7 @@ export default function ProfileScreen() {
       <AppText variant="caption" style={styles.footer}>
         {APP_NAME} is an independent app, not affiliated with or endorsed by Garena.
       </AppText>
+      <LegalLinks />
     </Screen>
   );
 }
