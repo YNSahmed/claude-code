@@ -2,52 +2,62 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { errorMessage } from '@/api/client';
+import {
+  useLeaderboard,
+  useMySquad,
+  useSettings,
+  useTournament,
+  useWithdrawSquad,
+} from '@/api/queries';
+import type { Squad } from '@/api/types';
+import { useAuth } from '@/auth/auth-context';
 import { Leaderboard } from '@/components/leaderboard';
 import { RoomCard } from '@/components/room-card';
-import { timeLabel } from '@/components/tournament-card';
 import { AppText } from '@/components/ui/app-text';
 import { ModeBadge, Pill, ProgressBar, StatusBadge } from '@/components/ui/badges';
 import { Button, IconButton } from '@/components/ui/button';
 import { Card, Divider, SectionTitle, StatTile } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Screen, ScreenHeader, useGoBack } from '@/components/ui/screen';
-import { PRIZE_SPLIT, TEAM_SIZE } from '@/constants/config';
+import { MAP_LABEL, MODE_LABEL } from '@/constants/config';
 import { Colors, MapStyles, Radius, type IconName } from '@/constants/theme';
-import { useStore, useTournament } from '@/data/store';
 import { useNow } from '@/hooks/use-now';
 import { confirmAction, haptics, shareText } from '@/utils/device';
-import { formatDateTime, formatEntry, formatMoney, ordinal } from '@/utils/format';
-import {
-  findRegistration,
-  inviteMessage,
-  isFull,
-  prizeForPlacement,
-  slotsLeft,
-} from '@/utils/tournament';
-
-const TEAMS_PREVIEW = 8;
+import { formatDateTime, formatEntry, formatMoney, formatPhone, ordinal } from '@/utils/format';
+import { inviteMessage, isRegistrationOpen, teamWord, timeLabel } from '@/utils/tournament';
 
 export default function TournamentScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const t = useTournament(id);
-  const { profile, leaveTournament } = useStore();
   const router = useRouter();
   const goBack = useGoBack();
   const insets = useSafeAreaInsets();
   const now = useNow();
-  const [showAllTeams, setShowAllTeams] = useState(false);
-  const [shareNote, setShareNote] = useState<string | null>(null);
+  const { isAdmin } = useAuth();
+  const { data, isLoading, isError, error, refetch, isRefetching } = useTournament(id);
+  const mySquad = useMySquad(id);
+  const t = data?.tournament;
+  const leaderboard = useLeaderboard(id, t?.status === 'COMPLETED');
+  const { data: settings } = useSettings();
+  const [note, setNote] = useState<string | null>(null);
 
-  if (!t) {
+  if (isLoading) {
+    return (
+      <Screen header={<ScreenHeader title="Tournament" />} bottomInset>
+        <ActivityIndicator color={Colors.primary} style={styles.loading} />
+      </Screen>
+    );
+  }
+  if (isError || !t) {
     return (
       <Screen header={<ScreenHeader title="Tournament" />} bottomInset>
         <EmptyState
           icon="search"
-          title="Tournament not found"
-          message="It may have been deleted by the organizer."
+          title="Couldn't open this tournament"
+          message={errorMessage(error)}
           actionLabel="Back to tournaments"
           onAction={() => router.replace('/')}
         />
@@ -55,57 +65,47 @@ export default function TournamentScreen() {
     );
   }
 
-  const mine = findRegistration(t, profile?.id);
-  const isHost = t.hostId === profile?.id;
+  const squad = mySquad.data ?? null;
   const map = MapStyles[t.map];
-  const teams = showAllTeams ? t.registrations : t.registrations.slice(0, TEAMS_PREVIEW);
-
   const share = async () => {
-    const how = await shareText(inviteMessage(t));
-    setShareNote(how === 'copied' ? 'Invite copied — paste it in your group chat.' : null);
-  };
-
-  const leave = async () => {
-    const yes = await confirmAction({
-      title: 'Leave this tournament?',
-      message: 'Your slot will be given up and your team removed.',
-      confirmText: 'Leave',
-      destructive: true,
-    });
-    if (yes && leaveTournament(t.id).ok) haptics.warning();
+    const how = await shareText(inviteMessage(t, settings?.whatsappChannelUrl));
+    setNote(how === 'copied' ? 'Invite copied. Paste it in your squad chat.' : null);
   };
 
   let footer: ReactNode;
-  if (isHost) {
+  if (isAdmin) {
     footer = (
       <Button
         title="Manage tournament"
         icon="settings-outline"
         size="lg"
-        onPress={() => router.push({ pathname: '/host/[id]', params: { id: t.id } })}
+        onPress={() => router.push({ pathname: '/admin/[id]', params: { id: t.id } })}
       />
     );
-  } else if (mine && t.status === 'upcoming') {
+  } else if (squad) {
     footer = (
       <View style={styles.footerRow}>
-        <View style={styles.joinedNote}>
-          <Ionicons name="checkmark-circle" size={22} color={Colors.live} />
-          <AppText variant="bodyStrong">You&apos;re in!</AppText>
-        </View>
-        <Button title="Leave" variant="danger" size="md" onPress={leave} style={styles.leave} />
+        <Ionicons name="checkmark-circle" size={22} color={Colors.live} />
+        <AppText variant="bodyStrong" style={styles.flex}>
+          {squad.name} is registered · Team #{squad.slotNumber}
+        </AppText>
       </View>
     );
-  } else if (t.status === 'upcoming' && !mine) {
-    footer = isFull(t) ? (
-      <Button title="All slots taken" size="lg" disabled />
-    ) : (
+  } else if (isRegistrationOpen(t)) {
+    footer = (
       <Button
-        title={`Join now · ${formatEntry(t.entryFee)}`}
+        title={`Register your ${teamWord(t, 1)} · Free`}
         icon="flash"
         size="lg"
-        onPress={() =>
-          router.push({ pathname: '/join/[id]', params: { id: t.id, from: 'details' } })
-        }
+        onPress={() => router.push({ pathname: '/register/[id]', params: { id: t.id } })}
+      />
+    );
+  } else if (t.status === 'OPEN') {
+    footer = (
+      <Button
+        title={t.teamsLeft === 0 ? 'All spots taken' : 'Registration closed'}
+        size="lg"
+        disabled
       />
     );
   }
@@ -115,6 +115,11 @@ export default function TournamentScreen() {
       header={null}
       bottomInset={!footer}
       footer={footer}
+      onRefresh={() => {
+        void refetch();
+        void mySquad.refetch();
+      }}
+      refreshing={isRefetching}
       hero={
         <LinearGradient
           colors={map.gradient}
@@ -145,40 +150,24 @@ export default function TournamentScreen() {
             <View style={styles.badges}>
               <ModeBadge mode={t.mode} onDark />
               <StatusBadge status={t.status} onDark />
-              {mine ? <Pill label="Joined" color={Colors.live} solid /> : null}
+              {squad ? <Pill label="Registered" color={Colors.live} solid /> : null}
             </View>
             <AppText variant="display">{t.title}</AppText>
             <AppText variant="caption" color="rgba(255,255,255,0.9)">
-              Hosted by {isHost ? 'you' : t.hostName}
+              {MAP_LABEL[t.map]} · {formatDateTime(t.startsAt, new Date(now))}
             </AppText>
           </View>
         </LinearGradient>
       }>
-      <View style={styles.spacer} />
-
-      {shareNote ? (
+      <View />
+      {note ? (
         <AppText variant="caption" color={Colors.live} style={styles.center}>
-          {shareNote}
+          {note}
         </AppText>
       ) : null}
 
-      {mine ? (
-        <Card style={styles.joinedCard}>
-          <SectionTitle
-            title={t.status === 'completed' ? 'Your team' : "You're registered"}
-            icon="shield-checkmark"
-          />
-          <AppText variant="bodyStrong">{mine.teamName}</AppText>
-          {mine.players.map((p, i) => (
-            <View key={p.uid} style={styles.playerRow}>
-              <AppText variant="caption" style={styles.playerIndex}>
-                {i + 1}
-              </AppText>
-              <AppText style={styles.flex}>{p.ign}</AppText>
-              <AppText variant="caption">UID {p.uid}</AppText>
-            </View>
-          ))}
-        </Card>
+      {squad ? (
+        <MySquadCard squad={squad} tournamentId={t.id} canWithdraw={t.status === 'OPEN'} />
       ) : null}
 
       <Card>
@@ -191,30 +180,29 @@ export default function TournamentScreen() {
           <Info
             icon="timer-outline"
             label="Status"
-            value={t.status === 'completed' ? 'Finished' : timeLabel(t, now)}
+            value={t.status === 'COMPLETED' ? 'Finished' : timeLabel(t, now)}
           />
         </View>
         <Divider />
         <View style={styles.infoRow}>
-          <Info icon="location-outline" label="Map" value={t.map} />
+          <Info icon="location-outline" label="Map" value={MAP_LABEL[t.map]} />
           <Info
             icon="people-outline"
             label="Mode"
-            value={t.mode === 'Solo' ? 'Solo' : `${t.mode} of ${TEAM_SIZE[t.mode]}`}
+            value={t.mode === 'SOLO' ? 'Solo' : `${MODE_LABEL[t.mode]} of ${t.teamSize}`}
           />
         </View>
         <Divider />
         <View style={styles.slots}>
           <View style={styles.slotsRow}>
             <AppText variant="caption">
-              {t.registrations.length}/{t.maxTeams} {t.mode === 'Solo' ? 'players' : 'teams'}{' '}
-              registered
+              {t.teamsRegistered}/{t.maxTeams} {teamWord(t)} registered
             </AppText>
             <AppText variant="caption" color={Colors.primary}>
-              {slotsLeft(t)} left
+              {t.teamsLeft} left
             </AppText>
           </View>
-          <ProgressBar value={t.registrations.length / t.maxTeams} />
+          <ProgressBar value={t.teamsRegistered / t.maxTeams} />
         </View>
       </Card>
 
@@ -222,86 +210,174 @@ export default function TournamentScreen() {
         <SectionTitle title="Prizes" icon="trophy" />
         <View style={styles.infoRow}>
           <StatTile label="Prize pool" value={formatMoney(t.prizePool)} color={Colors.gold} />
-          <StatTile label="Per kill" value={formatMoney(t.perKill)} />
-          <StatTile
-            label="Entry"
-            value={formatEntry(t.entryFee)}
-            color={t.entryFee === 0 ? Colors.live : undefined}
-          />
+          <StatTile label="Per kill" value={formatMoney(t.perKillReward)} />
+          <StatTile label="Entry" value={formatEntry(t.entryFee)} color={Colors.live} />
         </View>
         <View style={styles.split}>
-          {PRIZE_SPLIT.map((_, i) => (
+          {t.prizes.map((amount, i) => (
             <View key={i} style={styles.splitRow}>
               <AppText variant="bodyStrong" style={styles.flex}>
                 {ordinal(i + 1)} place
               </AppText>
               <AppText variant="stat" color={Colors.gold}>
-                {formatMoney(prizeForPlacement(t, i + 1))}
+                {formatMoney(amount)}
               </AppText>
             </View>
           ))}
-          <AppText variant="caption">Plus {formatMoney(t.perKill)} for every kill.</AppText>
+          {t.perKillReward > 0 ? (
+            <AppText variant="caption">Plus {formatMoney(t.perKillReward)} for every kill.</AppText>
+          ) : null}
         </View>
       </Card>
 
-      {t.status !== 'completed' ? <RoomCard tournament={t} unlocked={!!mine || isHost} /> : null}
+      {(squad || isAdmin) &&
+      (t.status === 'OPEN' || t.status === 'LOCKED' || t.status === 'LIVE') ? (
+        <RoomCard tournamentId={t.id} />
+      ) : null}
 
-      {t.status === 'completed' && t.results.length > 0 ? (
+      {t.status === 'COMPLETED' ? (
         <Card>
           <SectionTitle title="Leaderboard" icon="podium" />
-          <Leaderboard tournament={t} userId={profile?.id} />
+          {leaderboard.isLoading ? (
+            <ActivityIndicator color={Colors.primary} />
+          ) : (
+            <Leaderboard standings={leaderboard.data ?? []} mySquadId={squad?.id} />
+          )}
+        </Card>
+      ) : null}
+
+      {t.rules.length > 0 ? (
+        <Card>
+          <SectionTitle title="Rules" icon="document-text-outline" />
+          {t.rules.map((rule, i) => (
+            <View key={i} style={styles.ruleRow}>
+              <View style={styles.ruleDot} />
+              <AppText variant="caption" color={Colors.text} style={styles.flex}>
+                {rule}
+              </AppText>
+            </View>
+          ))}
         </Card>
       ) : null}
 
       <Card>
-        <SectionTitle title="Rules" icon="document-text-outline" />
-        {t.rules.map((rule, i) => (
-          <View key={i} style={styles.ruleRow}>
-            <View style={styles.ruleDot} />
-            <AppText variant="caption" color={Colors.text} style={styles.flex}>
-              {rule}
-            </AppText>
-          </View>
-        ))}
-      </Card>
-
-      <Card>
         <SectionTitle
-          title={t.mode === 'Solo' ? 'Players' : 'Teams'}
+          title={`Registered ${teamWord(t)}`}
           icon="people"
-          right={<AppText variant="caption">{t.registrations.length}</AppText>}
+          right={<AppText variant="caption">{data.squads.length}</AppText>}
         />
-        {t.registrations.length === 0 ? (
-          <AppText variant="caption">Nobody has joined yet. Be the first!</AppText>
+        {data.squads.length === 0 ? (
+          <AppText variant="caption">No one has registered yet. Be the first!</AppText>
         ) : null}
-        {teams.map((r, i) => (
-          <View key={r.id} style={styles.teamRow}>
-            <AppText variant="caption" style={styles.playerIndex}>
-              {i + 1}
-            </AppText>
-            <View style={styles.flex}>
-              <AppText variant="bodyStrong" numberOfLines={1}>
-                {r.teamName}
-                {r.userId === profile?.id ? '  (you)' : ''}
+        <View style={styles.squadGrid}>
+          {data.squads.map((s) => (
+            <View
+              key={s.slotNumber}
+              style={[styles.squadChip, s.name === squad?.name && styles.squadChipMine]}>
+              <AppText variant="caption" color={Colors.textFaint}>
+                #{s.slotNumber}
               </AppText>
-              {t.mode !== 'Solo' ? (
-                <AppText variant="caption" numberOfLines={1}>
-                  {r.players.map((p) => p.ign).join(' · ')}
-                </AppText>
-              ) : null}
+              <AppText variant="bodyStrong" numberOfLines={1}>
+                {s.name}
+              </AppText>
             </View>
-          </View>
-        ))}
-        {t.registrations.length > TEAMS_PREVIEW ? (
-          <Button
-            title={showAllTeams ? 'Show less' : `Show all ${t.registrations.length}`}
-            variant="ghost"
-            size="sm"
-            onPress={() => setShowAllTeams(!showAllTeams)}
-          />
-        ) : null}
+          ))}
+        </View>
+        <View style={styles.privacyNote}>
+          <Ionicons name="lock-closed" size={13} color={Colors.textFaint} />
+          <AppText variant="caption" color={Colors.textFaint}>
+            Only squad names are public. Members and numbers stay private.
+          </AppText>
+        </View>
       </Card>
     </Screen>
+  );
+}
+
+function MySquadCard({
+  squad,
+  tournamentId,
+  canWithdraw,
+}: {
+  squad: Squad;
+  tournamentId: string;
+  canWithdraw: boolean;
+}) {
+  const [reveal, setReveal] = useState(false);
+  const withdraw = useWithdrawSquad(tournamentId);
+  const isCaptain = squad.myRole === 'captain';
+
+  const onWithdraw = async () => {
+    const yes = await confirmAction({
+      title: `Withdraw ${squad.name}?`,
+      message: 'Your spot is released and your squad’s details are deleted.',
+      confirmText: 'Withdraw',
+      destructive: true,
+    });
+    if (yes) withdraw.mutate(undefined, { onSuccess: () => haptics.warning() });
+  };
+
+  return (
+    <Card style={styles.mySquad}>
+      <SectionTitle
+        title={squad.name}
+        icon="shield"
+        right={<Pill label={isCaptain ? 'You’re captain' : 'You’re in'} color={Colors.live} />}
+      />
+      <AppText variant="caption">
+        Team #{squad.slotNumber}
+        {squad.placement ? ` · Finished ${ordinal(squad.placement)} with ${squad.kills} kills` : ''}
+      </AppText>
+      {squad.members.map((m) => (
+        <View key={m.position} style={styles.member}>
+          <View style={[styles.memberNumber, m.isCaptain && styles.captainNumber]}>
+            <AppText style={styles.memberNumberText}>{m.position}</AppText>
+          </View>
+          <View style={styles.flex}>
+            <AppText variant="bodyStrong">
+              {m.name}
+              {m.isMe ? '  (you)' : ''}
+            </AppText>
+            {m.phone ? (
+              <AppText variant="caption">
+                {reveal || m.isMe ? formatPhone(m.phone) : m.phoneMasked}
+              </AppText>
+            ) : (
+              <AppText variant="caption" color={Colors.textFaint}>
+                Number private
+              </AppText>
+            )}
+          </View>
+          {m.freeFireUid ? <AppText variant="caption">UID {m.freeFireUid}</AppText> : null}
+        </View>
+      ))}
+      <View style={styles.squadActions}>
+        {isCaptain ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setReveal(!reveal)}
+            style={styles.reveal}>
+            <Ionicons
+              name={reveal ? 'eye-off-outline' : 'eye-outline'}
+              size={16}
+              color={Colors.textMuted}
+            />
+            <AppText variant="caption">{reveal ? 'Hide numbers' : 'Show numbers'}</AppText>
+          </Pressable>
+        ) : (
+          <View />
+        )}
+        {isCaptain && canWithdraw ? (
+          <Button
+            title="Withdraw"
+            variant="danger"
+            size="sm"
+            onPress={onWithdraw}
+            disabled={withdraw.isPending}
+          />
+        ) : null}
+      </View>
+    </Card>
   );
 }
 
@@ -323,6 +399,9 @@ const styles = StyleSheet.create({
   },
   center: {
     textAlign: 'center',
+  },
+  loading: {
+    marginTop: 60,
   },
   hero: {
     minHeight: 250,
@@ -355,20 +434,39 @@ const styles = StyleSheet.create({
     gap: 6,
     flexWrap: 'wrap',
   },
-  spacer: {
-    height: 0,
-  },
-  joinedCard: {
+  mySquad: {
     borderColor: `${Colors.live}66`,
   },
-  playerRow: {
+  member: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
-  playerIndex: {
-    width: 18,
-    textAlign: 'center',
+  memberNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surfaceRaised,
+  },
+  captainNumber: {
+    backgroundColor: Colors.primary,
+  },
+  memberNumberText: {
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  squadActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reveal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
   },
   infoRow: {
     flexDirection: 'row',
@@ -409,24 +507,34 @@ const styles = StyleSheet.create({
     marginTop: 6,
     backgroundColor: Colors.primary,
   },
-  teamRow: {
+  squadGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  squadChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 2,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surfaceRaised,
+    maxWidth: '100%',
+  },
+  squadChipMine: {
+    borderWidth: 1,
+    borderColor: Colors.live,
+  },
+  privacyNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-  },
-  joinedNote: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  leave: {
-    minWidth: 110,
+    gap: 10,
+    minHeight: 46,
   },
 });

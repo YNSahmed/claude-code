@@ -3,78 +3,68 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import type { SquadRole, Tournament } from '@/api/types';
+import { MAP_LABEL } from '@/constants/config';
 import { Colors, MapStyles, Radius } from '@/constants/theme';
-import type { Tournament } from '@/data/types';
-import { formatCountdown, formatDateTime, formatEntry, formatMoney } from '@/utils/format';
-import { findRegistration, isFull, slotsLeft } from '@/utils/tournament';
+import { formatDateTime, formatEntry, formatMoney } from '@/utils/format';
+import { isRegistrationOpen, teamWord, timeLabel } from '@/utils/tournament';
 
 import { AppText } from './ui/app-text';
 import { ModeBadge, Pill, ProgressBar, StatusBadge } from './ui/badges';
 import { Button, type ButtonProps } from './ui/button';
 import { StatTile } from './ui/card';
 
-export function timeLabel(t: Tournament, now: number): string {
-  if (t.status === 'live') return 'Live now';
-  if (t.status === 'completed') return formatDateTime(t.startsAt, new Date(now));
-  const msLeft = new Date(t.startsAt).getTime() - now;
-  if (msLeft <= 0) return 'Starting now';
-  if (msLeft < 86_400_000) return `Starts in ${formatCountdown(t.startsAt, now)}`;
-  return formatDateTime(t.startsAt, new Date(now));
-}
-
 export function TournamentCard({
   tournament: t,
-  userId,
   now,
+  myRole,
+  isAdmin,
+  preview,
 }: {
   tournament: Tournament;
-  userId?: string;
   now: number;
+  /** Set when the signed-in player is in a squad for this tournament. */
+  myRole?: SquadRole;
+  isAdmin?: boolean;
+  /** Non-interactive (used for the create-tournament preview). */
+  preview?: boolean;
 }) {
   const router = useRouter();
-  const mine = findRegistration(t, userId);
-  const isHost = t.hostId === userId;
-  const left = slotsLeft(t);
   const map = MapStyles[t.map];
-  const soon = t.status === 'upcoming' && new Date(t.startsAt).getTime() - now < 3_600_000;
-
+  const soon = t.status === 'OPEN' && new Date(t.startsAt).getTime() - now < 3_600_000;
   const open = () => router.push({ pathname: '/tournament/[id]', params: { id: t.id } });
 
   let action: ButtonProps;
-  if (isHost) {
+  if (isAdmin) {
     action = {
       title: 'Manage',
       variant: 'secondary',
       icon: 'settings-outline',
-      onPress: () => router.push({ pathname: '/host/[id]', params: { id: t.id } }),
+      onPress: () => router.push({ pathname: '/admin/[id]', params: { id: t.id } }),
     };
-  } else if (t.status === 'completed') {
+  } else if (t.status === 'COMPLETED') {
     action = { title: 'Results', variant: 'secondary', icon: 'podium', onPress: open };
-  } else if (mine) {
+  } else if (myRole) {
+    action = { title: 'Registered', variant: 'secondary', icon: 'checkmark-circle', onPress: open };
+  } else if (isRegistrationOpen(t)) {
     action = {
-      title: t.room ? 'Room ID' : 'Joined',
-      variant: 'secondary',
-      icon: t.room ? 'key-outline' : 'checkmark-circle',
-      onPress: open,
+      title: 'Register',
+      icon: 'flash',
+      onPress: () => router.push({ pathname: '/register/[id]', params: { id: t.id } }),
     };
-  } else if (t.status === 'live') {
-    action = { title: 'View', variant: 'secondary', onPress: open };
-  } else if (isFull(t)) {
+  } else if (t.status === 'OPEN' && t.teamsLeft === 0) {
     action = { title: 'Full', disabled: true };
   } else {
-    action = {
-      title: 'Join',
-      icon: 'flash',
-      onPress: () => router.push({ pathname: '/join/[id]', params: { id: t.id } }),
-    };
+    action = { title: 'View', variant: 'secondary', onPress: open };
   }
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, preview && styles.noPointer]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${t.title}, ${t.mode} on ${t.map}, prize pool ${formatMoney(t.prizePool)}`}
+        accessibilityLabel={`${t.title}, ${MAP_LABEL[t.map]}, prize pool ${formatMoney(t.prizePool)}`}
         onPress={open}
+        disabled={preview}
         style={({ pressed }) => pressed && styles.pressed}>
         <LinearGradient
           colors={map.gradient}
@@ -90,8 +80,13 @@ export function TournamentCard({
           <View style={styles.badges}>
             <ModeBadge mode={t.mode} onDark />
             <StatusBadge status={t.status} onDark />
-            {mine ? <Pill label="Joined" color={Colors.live} solid /> : null}
-            {isHost ? <Pill label="Hosting" color={Colors.gold} solid /> : null}
+            {myRole ? (
+              <Pill
+                label={myRole === 'captain' ? 'Your squad' : 'You’re in'}
+                color={Colors.live}
+                solid
+              />
+            ) : null}
           </View>
           <View>
             <AppText variant="title" numberOfLines={1}>
@@ -100,7 +95,7 @@ export function TournamentCard({
             <View style={styles.metaRow}>
               <Ionicons name="location-outline" size={13} color="rgba(255,255,255,0.85)" />
               <AppText variant="caption" color="rgba(255,255,255,0.85)">
-                {t.map} · {formatDateTime(t.startsAt, new Date(now))}
+                {MAP_LABEL[t.map]} · {formatDateTime(t.startsAt, new Date(now))}
               </AppText>
             </View>
           </View>
@@ -114,7 +109,7 @@ export function TournamentCard({
               color={Colors.gold}
               icon="trophy-outline"
             />
-            <StatTile label="Per kill" value={formatMoney(t.perKill)} icon="skull-outline" />
+            <StatTile label="Per kill" value={formatMoney(t.perKillReward)} icon="skull-outline" />
             <StatTile
               label="Entry"
               value={formatEntry(t.entryFee)}
@@ -122,19 +117,20 @@ export function TournamentCard({
               icon="ticket-outline"
             />
           </View>
-
           <View style={styles.slots}>
             <View style={styles.slotsRow}>
               <AppText variant="caption">
-                {t.registrations.length}/{t.maxTeams} {t.mode === 'Solo' ? 'players' : 'teams'}
+                {t.teamsRegistered}/{t.maxTeams} {teamWord(t)}
               </AppText>
               <AppText
                 variant="caption"
-                color={left > 0 && left <= 3 ? Colors.primary : Colors.textMuted}>
-                {left === 0 ? 'Slots full' : `${left} ${left === 1 ? 'slot' : 'slots'} left`}
+                color={t.teamsLeft > 0 && t.teamsLeft <= 2 ? Colors.primary : Colors.textMuted}>
+                {t.teamsLeft === 0
+                  ? 'Full'
+                  : `${t.teamsLeft} ${t.teamsLeft === 1 ? 'spot' : 'spots'} left`}
               </AppText>
             </View>
-            <ProgressBar value={t.registrations.length / t.maxTeams} />
+            <ProgressBar value={t.teamsRegistered / t.maxTeams} />
           </View>
         </View>
       </Pressable>
@@ -142,13 +138,13 @@ export function TournamentCard({
       <View style={styles.footer}>
         <View style={styles.metaRow}>
           <Ionicons
-            name={t.status === 'live' ? 'radio' : 'timer-outline'}
+            name={t.status === 'LIVE' ? 'radio' : 'timer-outline'}
             size={15}
-            color={t.status === 'live' ? Colors.live : soon ? Colors.primary : Colors.textMuted}
+            color={t.status === 'LIVE' ? Colors.live : soon ? Colors.primary : Colors.textMuted}
           />
           <AppText
             variant="bodyStrong"
-            color={t.status === 'live' ? Colors.live : soon ? Colors.primary : Colors.textMuted}>
+            color={t.status === 'LIVE' ? Colors.live : soon ? Colors.primary : Colors.textMuted}>
             {timeLabel(t, now)}
           </AppText>
         </View>
@@ -165,6 +161,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  noPointer: {
+    pointerEvents: 'none',
   },
   pressed: {
     opacity: 0.85,
@@ -215,6 +214,6 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   action: {
-    minWidth: 96,
+    minWidth: 104,
   },
 });

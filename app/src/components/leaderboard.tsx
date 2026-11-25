@@ -1,56 +1,46 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, View } from 'react-native';
 
+import type { Standing } from '@/api/types';
 import { Colors, Fonts, Radius } from '@/constants/theme';
-import type { Tournament } from '@/data/types';
 import { formatMoney } from '@/utils/format';
-import { standings } from '@/utils/tournament';
 
 import { AppText } from './ui/app-text';
 
-const MEDALS = ['#FFC23D', '#C9D3E3', '#D9895B'];
+export const MEDALS = ['#FFC23D', '#C9D3E3', '#D9895B'];
 
 export function Leaderboard({
-  tournament: t,
-  userId,
-  limit,
+  standings,
+  mySquadId,
 }: {
-  tournament: Tournament;
-  userId?: string;
-  limit?: number;
+  standings: Standing[];
+  mySquadId?: string;
 }) {
-  const rows = standings(t).slice(0, limit);
-
+  if (standings.length === 0)
+    return <AppText variant="caption">Results will appear here after the match.</AppText>;
   return (
     <View style={styles.list}>
-      {rows.map(({ result, registration, earnings }) => {
-        const medal = MEDALS[result.placement - 1];
-        const mine = registration.userId === userId;
+      {standings.map((s) => {
+        const medal = MEDALS[s.placement - 1];
+        const mine = s.squadId === mySquadId;
         return (
-          <View key={registration.id} style={[styles.row, mine && styles.mine]}>
+          <View key={s.squadId} style={[styles.row, mine && styles.mine]}>
             <View style={[styles.rank, medal ? { backgroundColor: medal } : null]}>
               <AppText style={[styles.rankText, medal ? { color: Colors.background } : null]}>
-                {result.placement}
+                {s.placement}
               </AppText>
             </View>
-            <View style={styles.team}>
-              <AppText variant="bodyStrong" numberOfLines={1}>
-                {registration.teamName}
-                {mine ? '  (you)' : ''}
-              </AppText>
-              {t.mode !== 'Solo' ? (
-                <AppText variant="caption" numberOfLines={1}>
-                  {registration.players.map((p) => p.ign).join(' · ')}
-                </AppText>
-              ) : null}
-            </View>
+            <AppText variant="bodyStrong" numberOfLines={1} style={styles.team}>
+              {s.squadName}
+              {mine ? '  (you)' : ''}
+            </AppText>
             <View style={styles.kills}>
               <Ionicons name="skull-outline" size={14} color={Colors.textMuted} />
-              <AppText variant="bodyStrong">{result.kills}</AppText>
+              <AppText variant="bodyStrong">{s.kills}</AppText>
             </View>
             <AppText
-              style={[styles.earnings, { color: earnings > 0 ? Colors.gold : Colors.textFaint }]}>
-              {earnings > 0 ? formatMoney(earnings) : '—'}
+              style={[styles.prize, { color: s.prize > 0 ? Colors.gold : Colors.textFaint }]}>
+              {s.prize > 0 ? formatMoney(s.prize) : '—'}
             </AppText>
           </View>
         );
@@ -98,7 +88,7 @@ const styles = StyleSheet.create({
     gap: 4,
     minWidth: 40,
   },
-  earnings: {
+  prize: {
     fontFamily: Fonts.display,
     fontSize: 16,
     minWidth: 64,

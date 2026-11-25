@@ -10,7 +10,8 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Colors, Gradients, ModeColors, Radius, StatusStyles } from '@/constants/theme';
-import type { Mode, TournamentStatus } from '@/data/types';
+import type { Mode, TournamentStatus } from '@/api/types';
+import { MODE_LABEL } from '@/constants/config';
 
 import { AppText } from './app-text';
 
@@ -29,7 +30,7 @@ export function Pill({ label, color, solid }: { label: string; color: string; so
 }
 
 export function ModeBadge({ mode, onDark }: { mode: Mode; onDark?: boolean }) {
-  const icon = mode === 'Solo' ? 'person' : 'people';
+  const icon = mode === 'SOLO' ? 'person' : 'people';
   return (
     <View
       style={[
@@ -41,7 +42,7 @@ export function ModeBadge({ mode, onDark }: { mode: Mode; onDark?: boolean }) {
       ]}>
       <Ionicons name={icon} size={11} color={onDark ? Colors.text : ModeColors[mode]} />
       <AppText style={[styles.pillText, { color: onDark ? Colors.text : ModeColors[mode] }]}>
-        {mode}
+        {MODE_LABEL[mode]}
       </AppText>
     </View>
   );
@@ -56,7 +57,7 @@ export function StatusBadge({ status, onDark }: { status: TournamentStatus; onDa
         styles.row,
         onDark ? styles.onDark : { backgroundColor: `${color}22`, borderColor: `${color}55` },
       ]}>
-      {status === 'live' ? <LiveDot /> : null}
+      {status === 'LIVE' ? <LiveDot /> : null}
       <AppText style={[styles.pillText, { color: onDark ? Colors.text : color }]}>{label}</AppText>
     </View>
   );

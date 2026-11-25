@@ -1,50 +1,56 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { CopyField } from '@/components/room-card';
-import { timeLabel } from '@/components/tournament-card';
+import { errorMessage } from '@/api/client';
+import { useMyRegistrations } from '@/api/queries';
+import type { Registration } from '@/api/types';
+import { RoomCard } from '@/components/room-card';
 import { AppText } from '@/components/ui/app-text';
-import { ModeBadge, StatusBadge } from '@/components/ui/badges';
+import { ModeBadge, Pill, StatusBadge } from '@/components/ui/badges';
 import { SectionTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Screen } from '@/components/ui/screen';
+import { WhatsAppChannelBanner } from '@/components/whatsapp';
+import { MAP_LABEL } from '@/constants/config';
 import { Colors, Fonts, MapStyles, Radius } from '@/constants/theme';
-import { useStore } from '@/data/store';
-import type { Registration, Tournament } from '@/data/types';
 import { useNow } from '@/hooks/use-now';
 import { formatDateTime, formatMoney, ordinal } from '@/utils/format';
-import { byStartTime, earningsFor, findRegistration } from '@/utils/tournament';
+import { timeLabel } from '@/utils/tournament';
 
-export default function MyMatchesScreen() {
-  const { tournaments, profile } = useStore();
+export default function MySquadsScreen() {
   const router = useRouter();
-  const now = useNow();
-
-  const mine = tournaments.flatMap((t) => {
-    const registration = findRegistration(t, profile?.id);
-    return registration ? [{ t, registration }] : [];
-  });
-  const active = mine
-    .filter(({ t }) => t.status !== 'completed')
-    .sort((a, b) => byStartTime(a.t, b.t));
-  const past = mine
-    .filter(({ t }) => t.status === 'completed')
-    .sort((a, b) => byStartTime(b.t, a.t));
+  const { data, isLoading, isError, error, refetch, isRefetching } = useMyRegistrations();
+  const active = (data ?? []).filter((r) =>
+    ['OPEN', 'LOCKED', 'LIVE'].includes(r.tournament.status)
+  );
+  const past = (data ?? []).filter(
+    (r) => !['OPEN', 'LOCKED', 'LIVE'].includes(r.tournament.status)
+  );
 
   return (
-    <Screen>
+    <Screen onRefresh={() => void refetch()} refreshing={isRefetching}>
       <View style={styles.header}>
-        <AppText variant="title">My Matches</AppText>
-        <AppText variant="caption">Your tickets, room details and results in one place.</AppText>
+        <AppText variant="title">My Squads</AppText>
+        <AppText variant="caption">Your squads, room details and results.</AppText>
       </View>
 
-      {mine.length === 0 ? (
+      {isLoading ? <ActivityIndicator color={Colors.primary} style={styles.loading} /> : null}
+      {isError ? (
         <EmptyState
-          icon="game-controller"
-          title="No matches yet"
-          message="Join a tournament and your match ticket, room ID and password will show up here."
+          icon="cloud-offline"
+          title="Couldn't load your squads"
+          message={errorMessage(error)}
+          actionLabel="Try again"
+          onAction={() => void refetch()}
+        />
+      ) : null}
+      {!isLoading && !isError && (data ?? []).length === 0 ? (
+        <EmptyState
+          icon="people"
+          title="No squads yet"
+          message="Register your squad for a tournament. If your captain added your number, you'll see the squad here too."
           actionLabel="Browse tournaments"
           onAction={() => router.navigate('/')}
         />
@@ -53,36 +59,29 @@ export default function MyMatchesScreen() {
       {active.length > 0 ? (
         <>
           <SectionTitle title="Up next" icon="flash" />
-          {active.map(({ t, registration }) => (
-            <MatchTicket key={t.id} tournament={t} registration={registration} now={now} />
+          {active.map((r) => (
+            <Ticket key={r.squad.id} registration={r} />
           ))}
         </>
       ) : null}
 
       {past.length > 0 ? (
         <>
-          <SectionTitle title="Past matches" icon="time-outline" />
-          {past.map(({ t, registration }) => (
-            <PastMatchRow key={t.id} tournament={t} registration={registration} />
+          <SectionTitle title="Past tournaments" icon="time-outline" />
+          {past.map((r) => (
+            <PastRow key={r.squad.id} registration={r} />
           ))}
         </>
       ) : null}
+
+      <WhatsAppChannelBanner compact />
     </Screen>
   );
 }
 
-function MatchTicket({
-  tournament: t,
-  registration,
-  now,
-}: {
-  tournament: Tournament;
-  registration: Registration;
-  now: number;
-}) {
+function Ticket({ registration: { tournament: t, squad } }: { registration: Registration }) {
   const router = useRouter();
-  const map = MapStyles[t.map];
-
+  const now = useNow();
   return (
     <View style={styles.ticket}>
       <Pressable
@@ -91,72 +90,56 @@ function MatchTicket({
         onPress={() => router.push({ pathname: '/tournament/[id]', params: { id: t.id } })}
         style={({ pressed }) => pressed && styles.pressed}>
         <LinearGradient
-          colors={map.gradient}
+          colors={MapStyles[t.map].gradient}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.ticketTop}>
           <View style={styles.badges}>
             <ModeBadge mode={t.mode} onDark />
             <StatusBadge status={t.status} onDark />
+            <Pill
+              label={squad.myRole === 'captain' ? 'Captain' : 'Member'}
+              color={Colors.gold}
+              solid
+            />
           </View>
           <AppText variant="heading" numberOfLines={1}>
             {t.title}
           </AppText>
           <AppText variant="caption" color="rgba(255,255,255,0.9)">
-            {t.map} · {timeLabel(t, now)}
+            {MAP_LABEL[t.map]} · {timeLabel(t, now)}
           </AppText>
         </LinearGradient>
       </Pressable>
       <View style={styles.perforation} />
       <View style={styles.ticketBody}>
         <View style={styles.teamRow}>
-          <Ionicons
-            name={t.mode === 'Solo' ? 'person' : 'people'}
-            size={16}
-            color={Colors.textMuted}
-          />
+          <Ionicons name="shield" size={16} color={Colors.primary} />
           <AppText variant="bodyStrong" style={styles.flex} numberOfLines={1}>
-            {registration.teamName}
+            {squad.name}
           </AppText>
+          <AppText variant="caption">Team #{squad.slotNumber}</AppText>
         </View>
-        {t.room ? (
-          <View style={styles.roomRow}>
-            <CopyField label="Room ID" value={t.room.id} />
-            <CopyField label="Password" value={t.room.password} />
-          </View>
-        ) : (
-          <View style={styles.waiting}>
-            <Ionicons name="time-outline" size={16} color={Colors.textMuted} />
-            <AppText variant="caption" style={styles.flex}>
-              Room ID and password will appear here before the match.
-            </AppText>
-          </View>
-        )}
+        <RoomCard tournamentId={t.id} compact />
       </View>
     </View>
   );
 }
 
-function PastMatchRow({
-  tournament: t,
-  registration,
-}: {
-  tournament: Tournament;
-  registration: Registration;
-}) {
+function PastRow({ registration: { tournament: t, squad } }: { registration: Registration }) {
   const router = useRouter();
-  const result = t.results.find((r) => r.registrationId === registration.id);
-  const earnings = result ? earningsFor(t, result) : 0;
-
+  const prize = squad.placement
+    ? (t.prizes[squad.placement - 1] ?? 0) + (squad.kills ?? 0) * t.perKillReward
+    : 0;
   return (
     <Pressable
       accessibilityRole="button"
       onPress={() => router.push({ pathname: '/tournament/[id]', params: { id: t.id } })}
       style={({ pressed }) => [styles.pastRow, pressed && styles.pressed]}>
-      <View style={[styles.placement, result?.placement === 1 && styles.placementWin]}>
+      <View style={[styles.placement, squad.placement === 1 && styles.placementWin]}>
         <AppText
-          style={[styles.placementText, result?.placement === 1 && { color: Colors.background }]}>
-          {result ? ordinal(result.placement) : '—'}
+          style={[styles.placementText, squad.placement === 1 && { color: Colors.background }]}>
+          {squad.placement ? ordinal(squad.placement) : '—'}
         </AppText>
       </View>
       <View style={styles.flex}>
@@ -164,11 +147,14 @@ function PastMatchRow({
           {t.title}
         </AppText>
         <AppText variant="caption">
-          {formatDateTime(t.startsAt)} · {result?.kills ?? 0} kills
+          {squad.name} ·{' '}
+          {t.status === 'CANCELLED'
+            ? 'Cancelled'
+            : `${squad.kills ?? 0} kills · ${formatDateTime(t.startsAt)}`}
         </AppText>
       </View>
-      <AppText style={[styles.earned, { color: earnings > 0 ? Colors.gold : Colors.textFaint }]}>
-        {earnings > 0 ? `+${formatMoney(earnings)}` : '—'}
+      <AppText style={[styles.prize, { color: prize > 0 ? Colors.gold : Colors.textFaint }]}>
+        {prize > 0 ? formatMoney(prize) : '—'}
       </AppText>
     </Pressable>
   );
@@ -179,11 +165,14 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     gap: 2,
   },
+  loading: {
+    marginTop: 40,
+  },
   flex: {
     flex: 1,
   },
   pressed: {
-    opacity: 0.9,
+    opacity: 0.88,
   },
   ticket: {
     borderRadius: Radius.lg,
@@ -202,7 +191,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   perforation: {
-    height: 0,
     borderTopWidth: 2,
     borderStyle: 'dashed',
     borderColor: Colors.border,
@@ -215,17 +203,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  roomRow: {
-    gap: 8,
-  },
-  waiting: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.surfaceRaised,
   },
   pastRow: {
     flexDirection: 'row',
@@ -253,7 +230,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: Colors.text,
   },
-  earned: {
+  prize: {
     fontFamily: Fonts.display,
     fontSize: 17,
   },

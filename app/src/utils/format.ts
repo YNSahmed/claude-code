@@ -61,3 +61,18 @@ export function initials(name: string): string {
   const clean = name.replace(/[^\p{L}\p{N}]/gu, '');
   return (clean.slice(0, 2) || '?').toUpperCase();
 }
+
+/** Remaining time as "1:05:09" or "4:09", for live countdowns. */
+export function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = (s % 60).toString().padStart(2, '0');
+  return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+/** "+919876543210" → "+91 98765 43210" */
+export function formatPhone(phone: string): string {
+  const digits = phone.replace(/^\+91/, '');
+  return digits.length === 10 ? `+91 ${digits.slice(0, 5)} ${digits.slice(5)}` : phone;
+}

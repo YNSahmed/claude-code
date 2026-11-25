@@ -2,9 +2,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router/js-tabs';
 import type { ColorValue } from 'react-native';
 
+import { useMyRegistrations } from '@/api/queries';
+import { useAuth } from '@/auth/auth-context';
 import { Colors, Fonts, type IconName } from '@/constants/theme';
-import { useStore } from '@/data/store';
-import { findRegistration } from '@/utils/tournament';
 
 function tabIcon(active: IconName, inactive: IconName) {
   function TabIcon({
@@ -29,15 +29,16 @@ function tabIcon(active: IconName, inactive: IconName) {
 
 const icons = {
   tournaments: tabIcon('trophy', 'trophy-outline'),
-  matches: tabIcon('game-controller', 'game-controller-outline'),
-  host: tabIcon('add-circle', 'add-circle-outline'),
+  squads: tabIcon('people', 'people-outline'),
+  organizer: tabIcon('shield-checkmark', 'shield-checkmark-outline'),
   profile: tabIcon('person-circle', 'person-circle-outline'),
 };
 
 export default function TabLayout() {
-  const { tournaments, profile } = useStore();
-  const activeMatches = tournaments.filter(
-    (t) => t.status !== 'completed' && findRegistration(t, profile?.id)
+  const { isAdmin } = useAuth();
+  const { data: registrations } = useMyRegistrations();
+  const upcoming = (registrations ?? []).filter((r) =>
+    ['OPEN', 'LOCKED', 'LIVE'].includes(r.tournament.status)
   ).length;
 
   return (
@@ -53,14 +54,22 @@ export default function TabLayout() {
       }}>
       <Tabs.Screen name="index" options={{ title: 'Tournaments', tabBarIcon: icons.tournaments }} />
       <Tabs.Screen
-        name="my-matches"
+        name="my-squads"
         options={{
-          title: 'My Matches',
-          tabBarIcon: icons.matches,
-          tabBarBadge: activeMatches > 0 ? activeMatches : undefined,
+          title: 'My Squads',
+          tabBarIcon: icons.squads,
+          tabBarBadge: upcoming > 0 ? upcoming : undefined,
         }}
       />
-      <Tabs.Screen name="host" options={{ title: 'Host', tabBarIcon: icons.host }} />
+      {/* Only the organizer sees this tab. */}
+      <Tabs.Screen
+        name="organizer"
+        options={{
+          title: 'Organizer',
+          tabBarIcon: icons.organizer,
+          href: isAdmin ? undefined : null,
+        }}
+      />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: icons.profile }} />
     </Tabs>
   );

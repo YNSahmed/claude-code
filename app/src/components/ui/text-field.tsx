@@ -66,6 +66,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   input: {
+    outlineWidth: 0,
     minHeight: 50,
     paddingHorizontal: 14,
     borderRadius: Radius.md,

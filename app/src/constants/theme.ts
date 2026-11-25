@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import type Ionicons from '@expo/vector-icons/Ionicons';
 
-import type { GameMap, Mode, TournamentStatus } from '@/data/types';
+import type { GameMap, Mode, TournamentStatus } from '@/api/types';
 
 export type IconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -31,24 +31,55 @@ export const Gradients = {
 } as const satisfies Record<string, Gradient>;
 
 export const MapStyles: Record<GameMap, { gradient: Gradient; icon: IconName }> = {
-  Bermuda: { gradient: ['#13B5A5', '#1B3F8B'], icon: 'earth' },
-  Purgatory: { gradient: ['#9B3CF0', '#2A0A4F'], icon: 'flame' },
-  Kalahari: { gradient: ['#F7A440', '#8A300B'], icon: 'sunny' },
-  Alpine: { gradient: ['#6FC8FF', '#24427A'], icon: 'snow' },
-  NeXTerra: { gradient: ['#00E0C6', '#4C1D95'], icon: 'planet' },
+  BERMUDA: { gradient: ['#13B5A5', '#1B3F8B'], icon: 'earth' },
+  PURGATORY: { gradient: ['#9B3CF0', '#2A0A4F'], icon: 'flame' },
+  KALAHARI: { gradient: ['#F7A440', '#8A300B'], icon: 'sunny' },
+  ALPINE: { gradient: ['#6FC8FF', '#24427A'], icon: 'snow' },
+  NEXTERRA: { gradient: ['#00E0C6', '#4C1D95'], icon: 'planet' },
 };
 
 export const ModeColors: Record<Mode, string> = {
-  Solo: '#3DA9FF',
-  Duo: '#B47CFF',
-  Squad: '#FF8A3D',
+  SOLO: '#3DA9FF',
+  DUO: '#B47CFF',
+  SQUAD: '#FF8A3D',
 };
 
 export const StatusStyles: Record<TournamentStatus, { label: string; color: string }> = {
-  upcoming: { label: 'Open', color: Colors.info },
-  live: { label: 'Live', color: Colors.live },
-  completed: { label: 'Completed', color: Colors.textMuted },
+  OPEN: { label: 'Open', color: Colors.info },
+  LOCKED: { label: 'Closed', color: Colors.gold },
+  LIVE: { label: 'Live', color: Colors.live },
+  COMPLETED: { label: 'Results', color: Colors.textMuted },
+  CANCELLED: { label: 'Cancelled', color: Colors.danger },
 };
+
+export const WhatsAppGreen = '#25D366';
+
+/** Poster colour themes. */
+export const PosterThemes = {
+  inferno: {
+    label: 'Inferno',
+    background: ['#2B0A05', '#7A1406', '#FF5A1F'],
+    accent: '#FFC23D',
+    text: '#FFFFFF',
+  },
+  neon: {
+    label: 'Neon',
+    background: ['#05061A', '#1B0F4A', '#00C2FF'],
+    accent: '#00F5D4',
+    text: '#FFFFFF',
+  },
+  royal: {
+    label: 'Royal',
+    background: ['#0B0B0B', '#1F1A0E', '#7A5A12'],
+    accent: '#FFD45C',
+    text: '#FFFFFF',
+  },
+} as const satisfies Record<
+  string,
+  { label: string; background: Gradient; accent: string; text: string }
+>;
+
+export type PosterThemeName = keyof typeof PosterThemes;
 
 /** Loaded in the root layout from @expo-google-fonts/rajdhani. */
 export const Fonts = {

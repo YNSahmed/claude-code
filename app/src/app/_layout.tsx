@@ -1,11 +1,13 @@
 import { Rajdhani_600SemiBold, Rajdhani_700Bold, useFonts } from '@expo-google-fonts/rajdhani';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
+import { ApiError } from '@/api/client';
+import { AuthProvider, useAuth } from '@/auth/auth-context';
 import { Colors } from '@/constants/theme';
-import { StoreProvider, useStore } from '@/data/store';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -21,29 +23,46 @@ const navigationTheme = {
   },
 };
 
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 15_000,
+        // Don't retry answers the server gave on purpose (4xx); do retry network blips.
+        retry: (count, error) =>
+          !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
+      },
+    },
+  });
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({ Rajdhani_600SemiBold, Rajdhani_700Bold });
+  const [queryClient] = useState(createQueryClient);
 
   return (
     <ThemeProvider value={navigationTheme}>
-      <StoreProvider>
-        <StatusBar style="light" />
-        <RootNavigator fontsReady={fontsLoaded || !!fontError} />
-      </StoreProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <StatusBar style="light" />
+          <RootNavigator fontsReady={fontsLoaded || !!fontError} />
+        </AuthProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }
 
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
-  const { ready, profile } = useStore();
-  const appReady = ready && fontsReady;
+  const { state, user, isAdmin } = useAuth();
+  const ready = fontsReady && state.status !== 'loading';
+  const signedIn = state.status === 'signedIn';
+  const needsProfile = !!user?.needsProfile;
 
   useEffect(() => {
-    if (appReady) SplashScreen.hideAsync();
-  }, [appReady]);
+    if (ready) SplashScreen.hideAsync();
+  }, [ready]);
 
-  // Keep the splash screen up until fonts and saved data have loaded.
-  if (!appReady) return null;
+  if (!ready) return null;
 
   return (
     <Stack
@@ -52,15 +71,24 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         contentStyle: { backgroundColor: Colors.background },
         animation: 'slide_from_right',
       }}>
-      <Stack.Protected guard={!!profile}>
+      <Stack.Protected guard={!signedIn}>
+        <Stack.Screen name="sign-in" options={{ animation: 'fade' }} />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && needsProfile}>
+        <Stack.Screen name="complete-profile" options={{ animation: 'fade' }} />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && !needsProfile}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="tournament/[id]" />
-        <Stack.Screen name="join/[id]" options={{ animation: 'slide_from_bottom' }} />
-        <Stack.Screen name="host/new" options={{ animation: 'slide_from_bottom' }} />
-        <Stack.Screen name="host/[id]" />
+        <Stack.Screen name="register/[id]" options={{ animation: 'slide_from_bottom' }} />
       </Stack.Protected>
-      <Stack.Protected guard={!profile}>
-        <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
+      {/* Organizer screens. The server enforces this too; hiding them is just good manners. */}
+      <Stack.Protected guard={signedIn && !needsProfile && isAdmin}>
+        <Stack.Screen name="admin/new" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="admin/[id]" />
+        <Stack.Screen name="admin/poster/[id]" />
+        <Stack.Screen name="admin/settings" />
+        <Stack.Screen name="admin/players" />
       </Stack.Protected>
     </Stack>
   );

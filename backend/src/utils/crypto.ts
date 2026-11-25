@@ -1,13 +1,12 @@
 import {
   createCipheriv,
+  hkdfSync,
   createDecipheriv,
   createHash,
   createHmac,
   randomBytes,
-  scrypt,
   timingSafeEqual,
   type BinaryLike,
-  type ScryptOptions,
 } from 'node:crypto';
 
 /**
@@ -58,35 +57,21 @@ export function decryptSecret(token: string, keyHex: string): string {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Password hashing with scrypt (memory-hard; built into Node, no native dependency).
-// Format: "scrypt$N$r$p$salt$hash" so parameters can be raised later without breaking old hashes.
+// Personal data: separate keys for each purpose, all derived from PII_ENCRYPTION_KEY with HKDF.
 // ---------------------------------------------------------------------------------------------
 
-const SCRYPT = { N: 2 ** 15, r: 8, p: 1, keyLength: 64 } as const;
-
-function scryptAsync(password: string, salt: Buffer, keyLength: number, options: ScryptOptions): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    scrypt(password, salt, keyLength, options, (error, derived) => (error ? reject(error) : resolve(derived)));
-  });
+export function deriveKey(masterKeyHex: string, purpose: string): Buffer {
+  return Buffer.from(hkdfSync('sha256', Buffer.from(masterKeyHex, 'hex'), Buffer.alloc(0), purpose, 32));
 }
 
-function scryptOptions(N: number, r: number, p: number): ScryptOptions {
-  return { N, r, p, maxmem: 256 * N * r };
+/** Keyed HMAC-SHA256, hex. Used to look up or compare private values without storing them in clear. */
+export function keyedHash(key: Buffer, value: string): string {
+  return createHmac('sha256', key).update(value).digest('hex');
 }
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16);
-  const hash = await scryptAsync(password, salt, SCRYPT.keyLength, scryptOptions(SCRYPT.N, SCRYPT.r, SCRYPT.p));
-  return ['scrypt', SCRYPT.N, SCRYPT.r, SCRYPT.p, salt.toString('base64'), hash.toString('base64')].join('$');
+/** Constant-time comparison of two hex digests. */
+export function safeEqualHex(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'hex');
+  const right = Buffer.from(b, 'hex');
+  return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
 }
-
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, n, r, p, saltB64, hashB64] = stored.split('$');
-  if (scheme !== 'scrypt' || !n || !r || !p || !saltB64 || !hashB64) return false;
-  const expected = Buffer.from(hashB64, 'base64');
-  const actual = await scryptAsync(password, Buffer.from(saltB64, 'base64'), expected.length, scryptOptions(+n, +r, +p));
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-/** A real hash of a random password. Checking against it keeps "unknown phone" as slow as "wrong password". */
-export const DUMMY_PASSWORD_HASH = await hashPassword(randomBytes(16).toString('hex'));

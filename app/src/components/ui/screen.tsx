@@ -1,6 +1,13 @@
 import { useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, MaxContentWidth } from '@/constants/theme';
@@ -18,9 +25,20 @@ interface ScreenProps {
   bottomInset?: boolean;
   /** Content drawn edge to edge above the padded content, such as a banner. */
   hero?: ReactNode;
+  /** Enables pull-to-refresh. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
-export function Screen({ children, header, footer, bottomInset = false, hero }: ScreenProps) {
+export function Screen({
+  children,
+  header,
+  footer,
+  bottomInset = false,
+  hero,
+  onRefresh,
+  refreshing,
+}: ScreenProps) {
   const insets = useSafeAreaInsets();
   const bottomPadding = footer ? 24 : bottomInset ? insets.bottom + 24 : 24;
 
@@ -34,7 +52,17 @@ export function Screen({ children, header, footer, bottomInset = false, hero }: 
           style={styles.flex}
           contentContainerStyle={{ paddingBottom: bottomPadding }}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            onRefresh ? (
+              <RefreshControl
+                refreshing={!!refreshing}
+                onRefresh={onRefresh}
+                tintColor={Colors.primary}
+                colors={[Colors.primary]}
+              />
+            ) : undefined
+          }>
           {hero}
           <View style={styles.content}>{children}</View>
         </ScrollView>

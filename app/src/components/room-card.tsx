@@ -1,48 +1,62 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
+import { useRoomAccess } from '@/api/queries';
 import { Colors, Fonts, Radius } from '@/constants/theme';
-import type { Tournament } from '@/data/types';
+import { useNow } from '@/hooks/use-now';
 import { copyText } from '@/utils/device';
-import { formatDateTime } from '@/utils/format';
+import { formatClock, formatDateTime } from '@/utils/format';
 
 import { AppText } from './ui/app-text';
 import { Card, SectionTitle } from './ui/card';
 
-/** Room ID and password. Locked until the player has joined. */
-export function RoomCard({
-  tournament: t,
-  unlocked,
-}: {
-  tournament: Tournament;
-  unlocked: boolean;
-}) {
-  return (
-    <Card style={unlocked && t.room ? styles.highlight : undefined}>
-      <SectionTitle title="Room details" icon="key-outline" />
-      {!unlocked ? (
-        <Notice
-          icon="lock-closed"
-          text="Join this tournament to unlock the room ID and password."
-        />
-      ) : !t.room ? (
+/** Room ID and password for a registered squad, with a live countdown until they're released. */
+export function RoomCard({ tournamentId, compact }: { tournamentId: string; compact?: boolean }) {
+  const { data, isLoading } = useRoomAccess(tournamentId, true);
+  const now = useNow(1000);
+
+  const body = (() => {
+    if (isLoading || !data) return <ActivityIndicator color={Colors.primary} />;
+    if (data.state === 'unavailable') return <Notice icon="lock-closed" text={data.message} />;
+    if (data.state === 'locked') {
+      const secondsLeft = data.releaseAt
+        ? Math.max(0, (new Date(data.releaseAt).getTime() - now) / 1000)
+        : null;
+      return secondsLeft !== null && secondsLeft > 0 ? (
+        <View style={styles.countdown}>
+          <AppText variant="label">Unlocks in</AppText>
+          <AppText style={styles.clock}>{formatClock(secondsLeft)}</AppText>
+          <AppText variant="caption">at {formatDateTime(data.releaseAt as string)}</AppText>
+        </View>
+      ) : (
         <Notice
           icon="time-outline"
-          text="The organizer shares the room ID and password 10–15 minutes before the start. They will show up right here."
+          text="The organizer shares the room ID and password shortly before the start. They will appear right here."
         />
-      ) : (
-        <>
-          <View style={styles.fields}>
-            <CopyField label="Room ID" value={t.room.id} />
-            <CopyField label="Password" value={t.room.password} />
-          </View>
+      );
+    }
+    return (
+      <>
+        <View style={styles.fields}>
+          <CopyField label="Room ID" value={data.roomId} />
+          <CopyField label="Password" value={data.roomPassword} />
+        </View>
+        {!compact ? (
           <AppText variant="caption">
-            Shared {formatDateTime(t.room.publishedAt)}. Open the game, go to Custom Room, and join
-            with these details.
+            Open the game → Custom Room → enter these details. Don&apos;t share them outside your
+            squad.
           </AppText>
-        </>
-      )}
+        ) : null}
+      </>
+    );
+  })();
+
+  if (compact) return <View style={styles.compact}>{body}</View>;
+  return (
+    <Card style={data?.state === 'released' ? styles.highlight : undefined}>
+      <SectionTitle title="Room details" icon="key-outline" />
+      {body}
     </Card>
   );
 }
@@ -51,7 +65,7 @@ function Notice({ icon, text }: { icon: 'lock-closed' | 'time-outline'; text: st
   return (
     <View style={styles.notice}>
       <Ionicons name={icon} size={20} color={Colors.textMuted} />
-      <AppText variant="caption" style={styles.noticeText}>
+      <AppText variant="caption" style={styles.flex}>
         {text}
       </AppText>
     </View>
@@ -70,10 +84,10 @@ export function CopyField({ label, value }: { label: string; value: string }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Copy ${label}: ${value}`}
+      accessibilityLabel={`Copy ${label}`}
       onPress={() => copyText(value).then(() => setCopied(true))}
       style={({ pressed }) => [styles.field, pressed && styles.pressed]}>
-      <View style={styles.fieldText}>
+      <View style={styles.flex}>
         <AppText variant="label">{label}</AppText>
         <AppText style={styles.value} selectable>
           {value}
@@ -94,6 +108,12 @@ export function CopyField({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
+  compact: {
+    gap: 8,
+  },
   highlight: {
     borderColor: `${Colors.live}66`,
   },
@@ -105,8 +125,19 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     backgroundColor: Colors.surfaceRaised,
   },
-  noticeText: {
-    flex: 1,
+  countdown: {
+    alignItems: 'center',
+    gap: 2,
+    padding: 12,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surfaceRaised,
+  },
+  clock: {
+    fontFamily: Fonts.display,
+    fontSize: 36,
+    lineHeight: 40,
+    color: Colors.primary,
+    letterSpacing: 1,
   },
   fields: {
     gap: 8,
@@ -123,10 +154,6 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.8,
-  },
-  fieldText: {
-    flex: 1,
-    gap: 2,
   },
   value: {
     fontFamily: Fonts.display,

@@ -3,6 +3,9 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { errorMessage } from '@/api/client';
+import { useCreateTournament } from '@/api/queries';
+import type { GameMap, Mode, Tournament } from '@/api/types';
 import { TournamentCard } from '@/components/tournament-card';
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
@@ -14,25 +17,23 @@ import { TextField } from '@/components/ui/text-field';
 import {
   CURRENCY_SYMBOL,
   DEFAULT_RULES,
+  MAP_LABEL,
   MAPS,
-  MAX_TEAMS,
+  MODE_LABEL,
   MODES,
+  ROOM_CAPACITY,
   TEAM_SIZE,
 } from '@/constants/config';
 import { Colors, MapStyles, ModeColors } from '@/constants/theme';
-import { useStore } from '@/data/store';
 import { useNow } from '@/hooks/use-now';
-import type { GameMap, Mode, Tournament } from '@/data/types';
-import { digitsOnly } from '@/data/validation';
 import { haptics } from '@/utils/device';
 import { formatDay, formatTime } from '@/utils/format';
 
 const DAYS_AHEAD = 7;
-/** Start times offered, in minutes after midnight: 10:00 AM to 11:30 PM every half hour. */
+/** Start times: 10:00 AM to 11:30 PM every half hour. */
 const TIME_SLOTS = Array.from({ length: 28 }, (_, i) => 600 + i * 30);
-const DEFAULT_TIME = 20 * 60;
-/** Today's slots must be at least this far away, so players have time to join. */
 const MIN_LEAD_MS = 30 * 60_000;
+const PRIZE_SPLIT = [0.5, 0.3, 0.2];
 
 function slotDate(dayOffset: number, minutes: number): Date {
   const date = new Date();
@@ -41,102 +42,102 @@ function slotDate(dayOffset: number, minutes: number): Date {
   return date;
 }
 
-function slotsFor(dayOffset: number): number[] {
+function slotsFor(day: number): number[] {
   const earliest = Date.now() + MIN_LEAD_MS;
-  return TIME_SLOTS.filter((m) => slotDate(dayOffset, m).getTime() >= earliest);
+  return TIME_SLOTS.filter((m) => slotDate(day, m).getTime() >= earliest);
 }
 
-function pickSlot(dayOffset: number, preferred: number): number {
-  const slots = slotsFor(dayOffset);
+const pickSlot = (day: number, preferred: number) => {
+  const slots = slotsFor(day);
   return slots.includes(preferred) ? preferred : (slots[0] ?? preferred);
-}
+};
 
 export default function NewTournamentScreen() {
-  const { profile, createTournament } = useStore();
   const router = useRouter();
   const now = useNow();
-
+  const create = useCreateTournament();
   const days = Array.from({ length: DAYS_AHEAD }, (_, i) => i).filter(
     (d) => slotsFor(d).length > 0
   );
-  const [title, setTitle] = useState('');
-  const [mode, setMode] = useState<Mode>('Squad');
-  const [map, setMap] = useState<GameMap>('Bermuda');
-  const [day, setDay] = useState(days[0]);
-  const [time, setTime] = useState(() => pickSlot(days[0], DEFAULT_TIME));
-  const [maxTeams, setMaxTeams] = useState(MAX_TEAMS.Squad);
-  const [entryFee, setEntryFee] = useState('0');
-  const [prizePool, setPrizePool] = useState('500');
-  const [perKill, setPerKill] = useState('5');
-  const [rules, setRules] = useState(DEFAULT_RULES.join('\n'));
-  const [error, setError] = useState<string | null>(null);
 
+  const [title, setTitle] = useState('');
+  const [mode, setMode] = useState<Mode>('SQUAD');
+  const [map, setMap] = useState<GameMap>('BERMUDA');
+  const [day, setDay] = useState(days[0] ?? 1);
+  const [time, setTime] = useState(() => pickSlot(days[0] ?? 1, 20 * 60));
+  const [maxTeams, setMaxTeams] = useState(12);
+  const [prizePool, setPrizePool] = useState('1000');
+  const [perKill, setPerKill] = useState('10');
+  const [rules, setRules] = useState(DEFAULT_RULES.join('\n'));
+
+  const teamCap = ROOM_CAPACITY / TEAM_SIZE[mode];
   const startsAt = slotDate(day, time).toISOString();
+  const pool = Number(prizePool) || 0;
   const draft: Tournament = {
     id: 'preview',
     title: title.trim() || 'Your tournament',
     mode,
+    teamSize: TEAM_SIZE[mode],
     map,
-    startsAt,
+    entryFee: 0,
+    prizePool: pool,
+    prizeSplitBps: [5000, 3000, 2000],
+    prizes: PRIZE_SPLIT.map((share) => Math.floor(pool * share)),
+    perKillReward: Number(perKill) || 0,
     maxTeams,
-    entryFee: Number(entryFee) || 0,
-    prizePool: Number(prizePool) || 0,
-    perKill: Number(perKill) || 0,
+    teamsRegistered: 0,
+    teamsLeft: maxTeams,
+    startsAt,
+    status: 'OPEN',
     rules: [],
-    hostId: 'preview',
-    hostName: profile?.ign ?? '',
-    status: 'upcoming',
-    room: null,
-    registrations: [],
-    results: [],
-    createdAt: startsAt,
+    roomPublished: false,
+    credentialsReleaseAt: null,
   };
 
-  const changeMode = (next: Mode) => {
-    setMode(next);
-    setMaxTeams(MAX_TEAMS[next]);
-  };
-
-  const changeDay = (next: number) => {
-    setDay(next);
-    setTime((current) => pickSlot(next, current));
-  };
-
-  const submit = () => {
-    const result = createTournament({
-      title,
-      mode,
-      map,
-      startsAt,
-      maxTeams,
-      entryFee: draft.entryFee,
-      prizePool: draft.prizePool,
-      perKill: draft.perKill,
-      rules: rules.split('\n'),
-    });
-    if (!result.ok) {
-      setError(result.error);
-      haptics.warning();
-      return;
-    }
-    haptics.success();
-    router.replace({ pathname: '/host/[id]', params: { id: result.id! } });
-  };
+  const submit = () =>
+    create.mutate(
+      {
+        title: title.trim(),
+        mode,
+        map,
+        startsAt,
+        maxTeams,
+        prizePool: pool,
+        perKillReward: Number(perKill) || 0,
+        rules: rules
+          .split('\n')
+          .map((r) => r.trim())
+          .filter(Boolean),
+      },
+      {
+        onSuccess: ({ tournament }) => {
+          haptics.success();
+          router.replace({ pathname: '/admin/[id]', params: { id: tournament.id } });
+        },
+        onError: () => haptics.warning(),
+      }
+    );
 
   return (
     <Screen
       header={<ScreenHeader title="New tournament" variant="close" />}
       footer={
         <View style={styles.footer}>
-          {error ? (
+          {create.isError ? (
             <View style={styles.error}>
               <Ionicons name="alert-circle" size={18} color={Colors.danger} />
               <AppText variant="caption" color={Colors.danger} style={styles.flex}>
-                {error}
+                {errorMessage(create.error)}
               </AppText>
             </View>
           ) : null}
-          <Button title="Create tournament" icon="rocket" size="lg" onPress={submit} />
+          <Button
+            title={create.isPending ? 'Creating…' : 'Create tournament'}
+            icon="rocket"
+            size="lg"
+            disabled={create.isPending || title.trim().length < 3}
+            onPress={submit}
+          />
         </View>
       }>
       <Card>
@@ -144,34 +145,34 @@ export default function NewTournamentScreen() {
           label="Tournament name"
           placeholder="e.g. Friday Night Squads"
           value={title}
-          onChangeText={(text) => {
-            setTitle(text);
-            setError(null);
-          }}
-          maxLength={32}
+          onChangeText={setTitle}
+          maxLength={60}
         />
       </Card>
 
       <Card>
         <SectionTitle title="Mode" icon="people" />
-        <View style={styles.wrapRow}>
+        <View style={styles.wrap}>
           {MODES.map((m) => (
             <Chip
               key={m}
-              label={`${m} · ${TEAM_SIZE[m]}`}
+              label={`${MODE_LABEL[m]} · ${TEAM_SIZE[m]}`}
               selected={mode === m}
-              onPress={() => changeMode(m)}
+              onPress={() => {
+                setMode(m);
+                setMaxTeams(ROOM_CAPACITY / TEAM_SIZE[m]);
+              }}
               color={ModeColors[m]}
-              icon={m === 'Solo' ? 'person' : 'people'}
+              icon={m === 'SOLO' ? 'person' : 'people'}
             />
           ))}
         </View>
         <SectionTitle title="Map" icon="location" />
-        <View style={styles.wrapRow}>
+        <View style={styles.wrap}>
           {MAPS.map((m) => (
             <Chip
               key={m}
-              label={m}
+              label={MAP_LABEL[m]}
               selected={map === m}
               onPress={() => setMap(m)}
               icon={MapStyles[m].icon}
@@ -189,7 +190,10 @@ export default function NewTournamentScreen() {
               key={d}
               label={formatDay(slotDate(d, 0))}
               selected={day === d}
-              onPress={() => changeDay(d)}
+              onPress={() => {
+                setDay(d);
+                setTime((current) => pickSlot(d, current));
+              }}
             />
           ))}
         </ChipRow>
@@ -206,33 +210,21 @@ export default function NewTournamentScreen() {
       </Card>
 
       <Card>
-        <SectionTitle title="Slots & prizes" icon="trophy" />
+        <SectionTitle title="Spots & prizes" icon="trophy" />
         <Stepper
-          label={mode === 'Solo' ? 'Max players' : 'Max teams'}
-          value={maxTeams}
+          label={`Max ${MODE_LABEL[mode].toLowerCase()}s`}
+          value={Math.min(maxTeams, teamCap)}
           onChange={setMaxTeams}
           min={2}
-          max={MAX_TEAMS[mode]}
-          format={(v) =>
-            `${v} ${mode === 'Solo' ? 'players' : 'teams'} · ${v * TEAM_SIZE[mode]} in room`
-          }
+          max={teamCap}
+          format={(v) => `${v} · ${v * TEAM_SIZE[mode]} players`}
         />
-        <View style={styles.moneyRow}>
-          <View style={styles.flex}>
-            <TextField
-              label={`Entry (${CURRENCY_SYMBOL})`}
-              value={entryFee}
-              onChangeText={(v) => setEntryFee(digitsOnly(v))}
-              keyboardType="number-pad"
-              maxLength={6}
-              hint="0 = free"
-            />
-          </View>
+        <View style={styles.row}>
           <View style={styles.flex}>
             <TextField
               label={`Prize pool (${CURRENCY_SYMBOL})`}
               value={prizePool}
-              onChangeText={(v) => setPrizePool(digitsOnly(v))}
+              onChangeText={(v) => setPrizePool(v.replace(/\D/g, ''))}
               keyboardType="number-pad"
               maxLength={7}
             />
@@ -241,14 +233,15 @@ export default function NewTournamentScreen() {
             <TextField
               label={`Per kill (${CURRENCY_SYMBOL})`}
               value={perKill}
-              onChangeText={(v) => setPerKill(digitsOnly(v))}
+              onChangeText={(v) => setPerKill(v.replace(/\D/g, ''))}
               keyboardType="number-pad"
               maxLength={5}
             />
           </View>
         </View>
         <AppText variant="caption">
-          The prize pool is split 50% / 30% / 20% between the top three.
+          Registration is free. The prize pool is split 50% / 30% / 20% for the top three; you pay
+          winners outside the app.
         </AppText>
       </Card>
 
@@ -258,9 +251,7 @@ export default function NewTournamentScreen() {
       </Card>
 
       <SectionTitle title="Preview" icon="eye-outline" />
-      <View style={styles.preview}>
-        <TournamentCard tournament={draft} now={now} />
-      </View>
+      <TournamentCard tournament={draft} now={now} preview />
     </Screen>
   );
 }
@@ -269,15 +260,12 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  wrapRow: {
+  wrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  preview: {
-    pointerEvents: 'none',
-  },
-  moneyRow: {
+  row: {
     flexDirection: 'row',
     gap: 8,
   },

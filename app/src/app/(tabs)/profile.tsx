@@ -1,49 +1,67 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { CopyField } from '@/components/room-card';
+import { api, errorMessage } from '@/api/client';
+import { useUpdateProfile } from '@/api/queries';
+import { useAuth } from '@/auth/auth-context';
 import { AppText } from '@/components/ui/app-text';
+import { Pill } from '@/components/ui/badges';
 import { Button } from '@/components/ui/button';
-import { Card, SectionTitle, StatTile } from '@/components/ui/card';
+import { Card, SectionTitle } from '@/components/ui/card';
 import { Screen } from '@/components/ui/screen';
 import { TextField } from '@/components/ui/text-field';
+import { WhatsAppChannelBanner } from '@/components/whatsapp';
 import { APP_NAME } from '@/constants/config';
-import { Colors, Fonts, Gradients, Radius } from '@/constants/theme';
-import { useStore } from '@/data/store';
-import { digitsOnly, validateIgn, validateUid } from '@/data/validation';
+import { Colors, Fonts, Gradients, Radius, type IconName } from '@/constants/theme';
 import { confirmAction, haptics } from '@/utils/device';
-import { formatMoney, initials } from '@/utils/format';
-import { playerStats } from '@/utils/tournament';
+import { formatPhone, initials } from '@/utils/format';
+
+const PRIVACY: { icon: IconName; text: string }[] = [
+  { icon: 'eye-off', text: 'Other players only see your squad name, never your number.' },
+  {
+    icon: 'people',
+    text: 'Your captain sees your squad’s names and numbers, because they entered them.',
+  },
+  {
+    icon: 'shield-checkmark',
+    text: 'Only the organizer can see everyone’s details, to run the tournament.',
+  },
+  {
+    icon: 'lock-closed',
+    text: 'Numbers are encrypted on our server, and your session is stored in your phone’s secure keychain.',
+  },
+];
 
 export default function ProfileScreen() {
-  const { profile, tournaments, saveProfile, resetApp } = useStore();
-  const [ign, setIgn] = useState(profile?.ign ?? '');
-  const [uid, setUid] = useState(profile?.uid ?? '');
+  const { user, setUser, signOut, isAdmin } = useAuth();
+  const [name, setName] = useState(user?.displayName ?? '');
   const [saved, setSaved] = useState(false);
+  const update = useUpdateProfile();
 
-  if (!profile) return null;
+  if (!user) return null;
+  const changed = name.trim() !== (user.displayName ?? '') && name.trim().length >= 2;
 
-  const stats = playerStats(tournaments, profile.id);
-  const changed = ign.trim() !== profile.ign || uid.trim() !== profile.uid;
-  const ignError = changed ? validateIgn(ign) : null;
-  const uidError = changed ? validateUid(uid) : null;
+  const save = () =>
+    update.mutate(name.trim(), {
+      onSuccess: ({ user: updated }) => {
+        setUser(updated);
+        setSaved(true);
+        haptics.success();
+      },
+    });
 
-  const save = () => {
-    const result = saveProfile({ ign, uid });
-    setSaved(result.ok);
-    if (result.ok) haptics.success();
-  };
-
-  const reset = async () => {
+  const signOutEverywhere = async () => {
     const yes = await confirmAction({
-      title: 'Reset the app?',
-      message:
-        'This deletes your profile, your registrations and the tournaments you host on this device.',
-      confirmText: 'Reset',
+      title: 'Sign out on all devices?',
+      message: 'You will need a new SMS code on every phone where you are signed in.',
+      confirmText: 'Sign out everywhere',
       destructive: true,
     });
-    if (yes) await resetApp();
+    if (!yes) return;
+    await api('/auth/sign-out-everywhere', { method: 'POST' }).catch(() => {});
+    await signOut();
   };
 
   return (
@@ -51,93 +69,66 @@ export default function ProfileScreen() {
       <LinearGradient colors={Gradients.night} style={styles.hero}>
         <LinearGradient colors={Gradients.fire} style={styles.avatarRing}>
           <View style={styles.avatar}>
-            <AppText style={styles.avatarText}>{initials(profile.ign)}</AppText>
+            <AppText style={styles.avatarText}>{initials(user.displayName ?? '')}</AppText>
           </View>
         </LinearGradient>
-        <AppText variant="title">{profile.ign}</AppText>
-        <AppText variant="caption">Player ID {profile.uid}</AppText>
+        <AppText variant="title">{user.displayName}</AppText>
+        <View style={styles.phoneRow}>
+          <Ionicons name="checkmark-circle" size={15} color={Colors.live} />
+          <AppText variant="caption">{formatPhone(user.phone)} · verified</AppText>
+        </View>
+        {isAdmin ? <Pill label="Organizer" color={Colors.gold} solid /> : null}
       </LinearGradient>
 
-      <Card>
-        <SectionTitle title="Career" icon="stats-chart" />
-        <View style={styles.statsRow}>
-          <StatTile label="Joined" value={String(stats.joined)} icon="ticket-outline" />
-          <StatTile
-            label="Wins"
-            value={String(stats.wins)}
-            icon="trophy-outline"
-            color={stats.wins > 0 ? Colors.gold : undefined}
-          />
-        </View>
-        <View style={styles.statsRow}>
-          <StatTile label="Kills" value={String(stats.kills)} icon="skull-outline" />
-          <StatTile
-            label="Winnings"
-            value={formatMoney(stats.earnings)}
-            icon="cash-outline"
-            color={Colors.gold}
-          />
-        </View>
-      </Card>
+      <WhatsAppChannelBanner />
 
       <Card>
-        <SectionTitle title="Player card" icon="id-card-outline" />
-        <CopyField label="Your player ID" value={profile.uid} />
+        <SectionTitle title="Your name" icon="person" />
         <TextField
-          label="In-game name (IGN)"
-          value={ign}
+          label="Display name"
+          value={name}
           onChangeText={(text) => {
-            setIgn(text);
+            setName(text);
             setSaved(false);
           }}
-          autoCapitalize="none"
-          autoCorrect={false}
-          maxLength={20}
-          error={ignError}
-        />
-        <TextField
-          label="Player ID (UID)"
-          value={uid}
-          onChangeText={(text) => {
-            setUid(digitsOnly(text));
-            setSaved(false);
-          }}
-          keyboardType="number-pad"
-          maxLength={12}
-          error={uidError}
-          hint="New registrations use this. Teams you've already registered keep their details."
+          maxLength={32}
+          error={update.isError ? errorMessage(update.error) : null}
         />
         <Button
-          title={saved ? 'Saved' : 'Save changes'}
+          title={saved ? 'Saved' : 'Save'}
           icon={saved ? 'checkmark-circle' : 'save-outline'}
           variant={changed ? 'primary' : 'secondary'}
-          disabled={!changed || !!ignError || !!uidError}
+          disabled={!changed || update.isPending}
           onPress={save}
         />
       </Card>
 
       <Card>
-        <SectionTitle title="How it works" icon="help-circle-outline" />
-        {[
-          'Pick a tournament and tap Join. Add your teammates for Duo or Squad.',
-          'Before the match, the room ID and password appear on your match ticket.',
-          'Open the game, go to Custom Room and join with those details.',
-          'After the match, the organizer posts the leaderboard and prizes.',
-        ].map((text, i) => (
-          <View key={text} style={styles.howRow}>
-            <View style={styles.howNumber}>
-              <AppText style={styles.howNumberText}>{i + 1}</AppText>
-            </View>
+        <SectionTitle title="Who can see your details" icon="shield-checkmark" />
+        {PRIVACY.map((p) => (
+          <View key={p.text} style={styles.privacyRow}>
+            <Ionicons name={p.icon} size={18} color={Colors.primary} />
             <AppText variant="caption" color={Colors.text} style={styles.flex}>
-              {text}
+              {p.text}
             </AppText>
           </View>
         ))}
       </Card>
 
-      <Button title="Reset app data" icon="refresh" variant="danger" onPress={reset} />
+      <Button
+        title="Sign out"
+        icon="log-out-outline"
+        variant="secondary"
+        onPress={() => void signOut()}
+      />
+      <Button
+        title="Sign out on all devices"
+        icon="phone-portrait-outline"
+        variant="danger"
+        onPress={signOutEverywhere}
+      />
       <AppText variant="caption" style={styles.footer}>
-        {APP_NAME} is an independent app and is not affiliated with or endorsed by Garena.
+        {APP_NAME} is an independent app, not affiliated with or endorsed by Garena.
       </AppText>
     </Screen>
   );
@@ -149,7 +140,7 @@ const styles = StyleSheet.create({
   },
   hero: {
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
     paddingVertical: 24,
     marginTop: 8,
     borderRadius: Radius.xl,
@@ -161,7 +152,7 @@ const styles = StyleSheet.create({
     height: 92,
     borderRadius: 46,
     padding: 3,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   avatar: {
     flex: 1,
@@ -174,27 +165,15 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.display,
     fontSize: 32,
   },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  howRow: {
+  phoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+  },
+  privacyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 12,
-  },
-  howNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.surfaceRaised,
-  },
-  howNumberText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primary,
   },
   footer: {
     textAlign: 'center',

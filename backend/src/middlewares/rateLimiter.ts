@@ -2,10 +2,12 @@ import type { Request } from 'express';
 import { ipKeyGenerator, rateLimit, type Options } from 'express-rate-limit';
 
 import { AppError } from '../utils/errors.js';
+import { normalizeIndianMobile } from '../utils/pii.js';
 
 /**
  * Rate limits. The default in-memory store is per process: when running more than one instance,
  * plug in a shared store (for example rate-limit-redis) so limits apply across all of them.
+ * (Login codes are also throttled per number in the database, which holds across instances.)
  */
 
 const common: Partial<Options> = {
@@ -21,21 +23,28 @@ const byUser = (req: Request) => (req.user ? `user:${req.user.id}` : byIp(req));
 /** Everything: a generous ceiling against floods and scraping. */
 export const globalLimiter = rateLimit({ ...common, windowMs: 60_000, limit: 300, keyGenerator: byIp });
 
-/** Sign-in and sign-up, per IP. */
-export const authIpLimiter = rateLimit({ ...common, windowMs: 15 * 60_000, limit: 30, keyGenerator: byIp });
+/** Asking for login codes, per IP (stops SMS-bombing many numbers from one place). */
+export const otpRequestIpLimiter = rateLimit({ ...common, windowMs: 15 * 60_000, limit: 20, keyGenerator: byIp });
 
-/** Sign-in attempts per phone number, against password guessing from many IPs. */
-export const authAccountLimiter = rateLimit({
+/** Entering login codes, per IP. */
+export const otpVerifyIpLimiter = rateLimit({ ...common, windowMs: 15 * 60_000, limit: 40, keyGenerator: byIp });
+
+/** Requests and guesses per phone number, whichever IP they come from. */
+export const otpPhoneLimiter = rateLimit({
   ...common,
   windowMs: 15 * 60_000,
-  limit: 8,
+  limit: 15,
   keyGenerator: (req) => {
-    const phone: unknown = (req.body as { phone?: unknown } | undefined)?.phone;
-    return typeof phone === 'string' ? `phone:${phone.slice(0, 20)}` : byIp(req);
+    const raw: unknown = (req.body as { phone?: unknown } | undefined)?.phone;
+    const phone = typeof raw === 'string' ? normalizeIndianMobile(raw) : null;
+    return phone ? `phone:${phone}` : byIp(req);
   },
 });
 
-/** Joining tournaments. */
+/** Registering or withdrawing squads. */
+export const squadLimiter = rateLimit({ ...common, windowMs: 60_000, limit: 10, keyGenerator: byUser });
+
+/** Joining tournaments (wallet mode). */
 export const joinLimiter = rateLimit({ ...common, windowMs: 60_000, limit: 10, keyGenerator: byUser });
 
 /** Creating deposit orders. */

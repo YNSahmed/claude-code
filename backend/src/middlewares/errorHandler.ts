@@ -25,12 +25,13 @@ const CONSTRAINT_ERRORS: Record<string, [number, string, string]> = {
   wallets_bonus_balance_non_negative: [409, 'INSUFFICIENT_BALANCE', 'Not enough bonus balance.'],
   wallets_locked_balance_non_negative: [409, 'INSUFFICIENT_BALANCE', 'Not enough locked balance.'],
   ledger_balance_after_non_negative: [409, 'INSUFFICIENT_BALANCE', 'Not enough balance.'],
-  tournaments_slots_within_capacity: [409, 'TOURNAMENT_FULL', 'All slots are taken.'],
-  tournament_participants_one_entry_per_user: [409, 'ALREADY_JOINED', 'You have already joined this tournament.'],
-  tournament_participants_one_entry_per_uid: [409, 'UID_ALREADY_REGISTERED', 'This Free Fire UID is already registered.'],
-  tournament_participants_one_player_per_slot: [409, 'SLOT_TAKEN', 'That slot was just taken. Try again.'],
+  tournaments_slots_within_capacity: [409, 'TOURNAMENT_FULL', 'All team spots are taken.'],
+  squads_one_per_captain: [409, 'ALREADY_REGISTERED', 'You have already registered a squad in this tournament.'],
+  squads_unique_name: [409, 'SQUAD_NAME_TAKEN', 'Another squad already uses this name. Pick a different one.'],
+  squads_one_per_slot: [409, 'SLOT_TAKEN', 'That team spot was just taken. Try again.'],
+  squad_members_one_squad_per_phone: [409, 'MEMBER_ALREADY_REGISTERED', 'Someone in your squad is already registered in this tournament.'],
+  squad_members_one_squad_per_uid: [409, 'UID_ALREADY_REGISTERED', 'One of these Free Fire UIDs is already registered in this tournament.'],
   users_phone_key: [409, 'PHONE_TAKEN', 'An account with this phone number already exists.'],
-  users_free_fire_uid_key: [409, 'UID_TAKEN', 'This Free Fire UID is linked to another account.'],
 };
 
 function fromPostgres(error: PgError): AppError {

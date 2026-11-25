@@ -6,14 +6,16 @@ import { logger } from './utils/logger.js';
 const app = createApp();
 
 const server = app.listen(env.PORT, () => {
-  logger.info('API listening', { port: env.PORT, env: env.NODE_ENV, gateway: env.PAYMENT_GATEWAY });
+  logger.info('API listening', { port: env.PORT, env: env.NODE_ENV, sms: env.SMS_PROVIDER, wallet: env.WALLET_ENABLED });
 });
 
-// Keep the idempotency table small: completed keys only need to outlive client and gateway retries.
+// Housekeeping: completed idempotency keys only need to outlive retries, and old login codes
+// (even hashed) are kept no longer than needed for abuse checks.
 const cleanup = setInterval(() => {
-  pool
-    .query(`DELETE FROM idempotency_keys WHERE status = 'COMPLETED' AND created_at < now() - interval '7 days'`)
-    .catch((error: unknown) => logger.warn('Idempotency cleanup failed', { error: String(error) }));
+  Promise.all([
+    pool.query(`DELETE FROM idempotency_keys WHERE status = 'COMPLETED' AND created_at < now() - interval '7 days'`),
+    pool.query(`DELETE FROM otp_challenges WHERE created_at < now() - interval '1 day'`),
+  ]).catch((error: unknown) => logger.warn('Cleanup failed', { error: String(error) }));
 }, 60 * 60_000);
 cleanup.unref();
 

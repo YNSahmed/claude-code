@@ -2,65 +2,58 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
+import { errorMessage } from '@/api/client';
+import { useMyRegistrations, useTournaments } from '@/api/queries';
+import type { Mode, Tournament } from '@/api/types';
+import { useAuth } from '@/auth/auth-context';
 import { Logo } from '@/components/brand';
-import { TournamentCard, timeLabel } from '@/components/tournament-card';
+import { TournamentCard } from '@/components/tournament-card';
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
 import { Chip, ChipRow, SegmentedControl } from '@/components/ui/chip';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Screen } from '@/components/ui/screen';
-import { MODES } from '@/constants/config';
+import { WhatsAppChannelBanner } from '@/components/whatsapp';
+import { MAP_LABEL, MODE_LABEL, MODES } from '@/constants/config';
 import { Colors, Fonts, Gradients, ModeColors, Radius } from '@/constants/theme';
-import { useStore } from '@/data/store';
-import type { Mode, Tournament, TournamentStatus } from '@/data/types';
 import { useNow } from '@/hooks/use-now';
 import { formatMoney, initials } from '@/utils/format';
-import { byStartTime, canJoin, findRegistration, slotsLeft } from '@/utils/tournament';
-
-const EMPTY_COPY: Record<TournamentStatus, { title: string; message: string }> = {
-  upcoming: {
-    title: 'No open tournaments',
-    message: 'New tournaments show up here. Want to run one yourself? Head to the Host tab.',
-  },
-  live: {
-    title: 'Nothing live right now',
-    message: 'Matches appear here while they are being played.',
-  },
-  completed: {
-    title: 'No results yet',
-    message: 'Finished tournaments and their leaderboards show up here.',
-  },
-};
+import { isRegistrationOpen, teamWord, timeLabel } from '@/utils/tournament';
 
 export default function TournamentsScreen() {
-  const { tournaments, profile } = useStore();
   const router = useRouter();
   const now = useNow();
-  const [status, setStatus] = useState<TournamentStatus>('upcoming');
-  const [mode, setMode] = useState<Mode | 'All'>('All');
+  const { user, isAdmin } = useAuth();
+  const [scope, setScope] = useState<'active' | 'completed'>('active');
+  const [mode, setMode] = useState<Mode | 'ALL'>('ALL');
+  const active = useTournaments('active');
+  const completed = useTournaments('completed');
+  const { data: registrations } = useMyRegistrations();
 
-  const count = (s: TournamentStatus) => tournaments.filter((t) => t.status === s).length;
-  const list = tournaments
-    .filter((t) => t.status === status && (mode === 'All' || t.mode === mode))
-    .sort((a, b) => (status === 'completed' ? byStartTime(b, a) : byStartTime(a, b)));
-
-  const featured = tournaments
-    .filter((t) => canJoin(t, profile?.id))
+  const roles = new Map((registrations ?? []).map((r) => [r.tournament.id, r.squad.myRole]));
+  const query = scope === 'active' ? active : completed;
+  const list = (query.data ?? []).filter((t) => mode === 'ALL' || t.mode === mode);
+  const featured = (active.data ?? [])
+    .filter((t) => isRegistrationOpen(t) && !roles.has(t.id))
     .sort((a, b) => b.prizePool - a.prizePool)[0];
 
   return (
-    <Screen>
+    <Screen
+      onRefresh={() => {
+        void active.refetch();
+        void completed.refetch();
+      }}
+      refreshing={active.isRefetching || completed.isRefetching}>
       <View style={styles.topBar}>
         <Logo size={34} />
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open your profile"
-          onPress={() => router.navigate('/profile')}
-          style={({ pressed }) => pressed && styles.pressed}>
+          onPress={() => router.navigate('/profile')}>
           <LinearGradient colors={Gradients.fire} style={styles.avatar}>
-            <AppText style={styles.avatarText}>{initials(profile?.ign ?? '')}</AppText>
+            <AppText style={styles.avatarText}>{initials(user?.displayName ?? '')}</AppText>
           </LinearGradient>
         </Pressable>
       </View>
@@ -68,51 +61,74 @@ export default function TournamentsScreen() {
       <View>
         <AppText variant="caption">Ready to drop,</AppText>
         <AppText variant="title" numberOfLines={1}>
-          {profile?.ign}?
+          {user?.displayName}?
         </AppText>
       </View>
 
-      {featured ? <FeaturedCard tournament={featured} now={now} /> : null}
+      {featured && !isAdmin ? <FeaturedCard tournament={featured} now={now} /> : null}
+
+      <WhatsAppChannelBanner />
 
       <SegmentedControl
-        value={status}
-        onChange={setStatus}
+        value={scope}
+        onChange={setScope}
         options={[
-          { value: 'upcoming', label: 'Upcoming', count: count('upcoming') },
-          { value: 'live', label: 'Live', count: count('live') },
-          { value: 'completed', label: 'Results', count: count('completed') },
+          { value: 'active', label: 'Upcoming & live', count: active.data?.length },
+          { value: 'completed', label: 'Results', count: completed.data?.length },
         ]}
       />
 
       <ChipRow>
         <Chip
           label="All modes"
-          selected={mode === 'All'}
-          onPress={() => setMode('All')}
+          selected={mode === 'ALL'}
+          onPress={() => setMode('ALL')}
           icon="apps"
         />
         {MODES.map((m) => (
           <Chip
             key={m}
-            label={m}
+            label={MODE_LABEL[m]}
             selected={mode === m}
             onPress={() => setMode(m)}
             color={ModeColors[m]}
-            icon={m === 'Solo' ? 'person' : 'people'}
+            icon={m === 'SOLO' ? 'person' : 'people'}
           />
         ))}
       </ChipRow>
 
-      {list.length > 0 ? (
-        list.map((t) => <TournamentCard key={t.id} tournament={t} userId={profile?.id} now={now} />)
-      ) : (
+      {query.isLoading ? (
+        <ActivityIndicator color={Colors.primary} style={styles.loading} />
+      ) : query.isError ? (
         <EmptyState
-          icon={status === 'live' ? 'radio' : status === 'completed' ? 'podium' : 'trophy'}
-          title={EMPTY_COPY[status].title}
-          message={EMPTY_COPY[status].message}
-          actionLabel={status === 'upcoming' ? 'Host a tournament' : undefined}
-          onAction={() => router.push('/host/new')}
+          icon="cloud-offline"
+          title="Couldn't load tournaments"
+          message={errorMessage(query.error)}
+          actionLabel="Try again"
+          onAction={() => void query.refetch()}
         />
+      ) : list.length === 0 ? (
+        <EmptyState
+          icon={scope === 'active' ? 'trophy' : 'podium'}
+          title={scope === 'active' ? 'No tournaments right now' : 'No results yet'}
+          message={
+            scope === 'active'
+              ? 'New tournaments are announced here and on our WhatsApp Channel.'
+              : 'Finished tournaments and their leaderboards show up here.'
+          }
+          actionLabel={isAdmin && scope === 'active' ? 'Create a tournament' : undefined}
+          onAction={() => router.push('/admin/new')}
+        />
+      ) : (
+        list.map((t) => (
+          <TournamentCard
+            key={t.id}
+            tournament={t}
+            now={now}
+            myRole={roles.get(t.id)}
+            isAdmin={isAdmin}
+          />
+        ))
       )}
     </Screen>
   );
@@ -120,12 +136,6 @@ export default function TournamentsScreen() {
 
 function FeaturedCard({ tournament: t, now }: { tournament: Tournament; now: number }) {
   const router = useRouter();
-  const { profile } = useStore();
-  const joined = !!findRegistration(t, profile?.id);
-  const left = slotsLeft(t);
-
-  const openDetails = () => router.push({ pathname: '/tournament/[id]', params: { id: t.id } });
-
   return (
     <LinearGradient
       colors={Gradients.fire}
@@ -141,7 +151,7 @@ function FeaturedCard({ tournament: t, now }: { tournament: Tournament; now: num
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Featured: ${t.title}`}
-        onPress={openDetails}
+        onPress={() => router.push({ pathname: '/tournament/[id]', params: { id: t.id } })}
         style={({ pressed }) => [styles.featuredInfo, pressed && styles.pressed]}>
         <View style={styles.featuredTag}>
           <Ionicons name="star" size={11} color={Colors.primary} />
@@ -151,7 +161,7 @@ function FeaturedCard({ tournament: t, now }: { tournament: Tournament; now: num
           {t.title}
         </AppText>
         <AppText variant="caption" color="rgba(255,255,255,0.9)">
-          {t.mode} · {t.map} · {timeLabel(t, now)}
+          {MODE_LABEL[t.mode]} · {MAP_LABEL[t.map]} · {timeLabel(t, now)}
         </AppText>
       </Pressable>
       <View style={styles.featuredBottom}>
@@ -161,17 +171,15 @@ function FeaturedCard({ tournament: t, now }: { tournament: Tournament; now: num
           </AppText>
           <AppText style={styles.featuredPrize}>{formatMoney(t.prizePool)}</AppText>
           <AppText variant="caption" color="rgba(255,255,255,0.9)">
-            {left} {left === 1 ? 'slot' : 'slots'} left
+            Free entry · {t.teamsLeft} {teamWord(t, t.teamsLeft)} left
           </AppText>
         </View>
         <Button
-          title={joined ? 'View' : 'Join now'}
+          title="Register"
           variant="secondary"
-          icon={joined ? 'eye-outline' : 'flash'}
+          icon="flash"
           style={styles.featuredButton}
-          onPress={() =>
-            joined ? openDetails() : router.push({ pathname: '/join/[id]', params: { id: t.id } })
-          }
+          onPress={() => router.push({ pathname: '/register/[id]', params: { id: t.id } })}
         />
       </View>
     </LinearGradient>
@@ -196,9 +204,11 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.display,
     fontSize: 16,
   },
+  loading: {
+    marginTop: 40,
+  },
   pressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.99 }],
+    opacity: 0.85,
   },
   featured: {
     borderRadius: Radius.xl,

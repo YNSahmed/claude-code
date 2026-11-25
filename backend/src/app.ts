@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 
+import cors from 'cors';
 import express, { type Express, type Request } from 'express';
 import helmet from 'helmet';
 
@@ -9,6 +10,7 @@ import { env } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 import { globalLimiter } from './middlewares/rateLimiter.js';
 import { authRouter, usersRouter } from './modules/auth/auth.routes.js';
+import { settingsRouter } from './modules/settings/settings.routes.js';
 import { tournamentRouter } from './modules/tournaments/tournament.routes.js';
 import { walletRouter } from './modules/wallet/wallet.routes.js';
 
@@ -28,6 +30,8 @@ export function createApp(): Express {
   });
 
   app.use(helmet());
+  // Only the listed browser origins (the web build) may call the API; mobile apps are unaffected.
+  app.use(cors({ origin: env.CORS_ORIGINS, allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'], maxAge: 600 }));
 
   // Parse JSON, keeping the exact bytes for webhook signature checks and idempotency hashing.
   app.use(
@@ -49,8 +53,10 @@ export function createApp(): Express {
 
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/users', usersRouter);
-  app.use('/api/v1/wallet', walletRouter);
+  app.use('/api/v1/settings', settingsRouter);
   app.use('/api/v1/tournaments', tournamentRouter);
+  // The token wallet stays switched off unless WALLET_ENABLED=true (registration is free).
+  if (env.WALLET_ENABLED) app.use('/api/v1/wallet', walletRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

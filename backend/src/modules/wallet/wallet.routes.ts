@@ -34,9 +34,12 @@ export const walletRouter = Router();
 
 /** Rejects any webhook whose X-Razorpay-Signature is not a valid HMAC of the raw body. */
 function verifyGatewaySignature(req: Request, _res: Response, next: NextFunction): void {
+  const secret = env.RAZORPAY_WEBHOOK_SECRET;
   const valid =
+    secret !== undefined &&
+    secret.length >= 16 &&
     req.rawBody !== undefined &&
-    verifyHmacSha256Signature(req.rawBody, req.get('x-razorpay-signature'), env.RAZORPAY_WEBHOOK_SECRET);
+    verifyHmacSha256Signature(req.rawBody, req.get('x-razorpay-signature'), secret);
   if (!valid) throw new AppError(401, 'INVALID_SIGNATURE', 'Invalid webhook signature.');
   next();
 }

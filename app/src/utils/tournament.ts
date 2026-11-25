@@ -1,91 +1,37 @@
-import { APP_NAME, PRIZE_SPLIT, TEAM_SIZE } from '@/constants/config';
-import type { Registration, Result, Tournament } from '@/data/types';
+import type { Tournament } from '@/api/types';
+import { APP_NAME, MAP_LABEL, MODE_LABEL } from '@/constants/config';
 
-import { formatDateTime, formatEntry, formatMoney } from './format';
+import { formatCountdown, formatDateTime, formatEntry, formatMoney } from './format';
 
-export function teamSize(t: Tournament): number {
-  return TEAM_SIZE[t.mode];
+export function isRegistrationOpen(t: Tournament): boolean {
+  return t.status === 'OPEN' && t.teamsLeft > 0 && new Date(t.startsAt).getTime() > Date.now();
 }
 
-export function slotsLeft(t: Tournament): number {
-  return Math.max(0, t.maxTeams - t.registrations.length);
+/** "Starts in 2h 10m", "Live now", or the date. */
+export function timeLabel(t: Tournament, now: number): string {
+  if (t.status === 'LIVE') return 'Live now';
+  if (t.status === 'CANCELLED') return 'Cancelled';
+  if (t.status === 'COMPLETED') return formatDateTime(t.startsAt, new Date(now));
+  const msLeft = new Date(t.startsAt).getTime() - now;
+  if (msLeft <= 0) return 'Starting now';
+  if (msLeft < 86_400_000) return `Starts in ${formatCountdown(t.startsAt, now)}`;
+  return formatDateTime(t.startsAt, new Date(now));
 }
 
-export function isFull(t: Tournament): boolean {
-  return slotsLeft(t) === 0;
+export function teamWord(t: Pick<Tournament, 'mode'>, count = 2): string {
+  const word = t.mode === 'SOLO' ? 'player' : t.mode === 'DUO' ? 'duo' : 'squad';
+  return count === 1 ? word : `${word}s`;
 }
 
-export function findRegistration(
-  t: Tournament,
-  userId: string | undefined
-): Registration | undefined {
-  if (!userId) return undefined;
-  return t.registrations.find((r) => r.userId === userId);
-}
-
-export function canJoin(t: Tournament, userId: string | undefined): boolean {
-  return (
-    t.status === 'upcoming' && !isFull(t) && !findRegistration(t, userId) && t.hostId !== userId
-  );
-}
-
-export function prizeForPlacement(t: Tournament, placement: number): number {
-  return Math.round((PRIZE_SPLIT[placement - 1] ?? 0) * t.prizePool);
-}
-
-export function earningsFor(t: Tournament, result: Result): number {
-  return prizeForPlacement(t, result.placement) + result.kills * t.perKill;
-}
-
-export interface Standing {
-  result: Result;
-  registration: Registration;
-  earnings: number;
-}
-
-export function standings(t: Tournament): Standing[] {
-  return [...t.results]
-    .sort((a, b) => a.placement - b.placement)
-    .flatMap((result) => {
-      const registration = t.registrations.find((r) => r.id === result.registrationId);
-      return registration ? [{ result, registration, earnings: earningsFor(t, result) }] : [];
-    });
-}
-
-export interface PlayerStats {
-  joined: number;
-  played: number;
-  wins: number;
-  kills: number;
-  earnings: number;
-}
-
-export function playerStats(tournaments: Tournament[], userId: string): PlayerStats {
-  const stats: PlayerStats = { joined: 0, played: 0, wins: 0, kills: 0, earnings: 0 };
-  for (const t of tournaments) {
-    const registration = findRegistration(t, userId);
-    if (!registration) continue;
-    stats.joined += 1;
-    const result = t.results.find((r) => r.registrationId === registration.id);
-    if (t.status !== 'completed' || !result) continue;
-    stats.played += 1;
-    stats.kills += result.kills;
-    stats.earnings += earningsFor(t, result);
-    if (result.placement === 1) stats.wins += 1;
-  }
-  return stats;
-}
-
-export function byStartTime(a: Tournament, b: Tournament): number {
-  return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
-}
-
-/** Text for sharing a tournament in a group chat. */
-export function inviteMessage(t: Tournament): string {
+/** Text to post with a poster or share in a group chat. */
+export function inviteMessage(t: Tournament, channelUrl?: string | null): string {
   return [
-    `🔥 ${t.title}`,
-    `${t.mode} · ${t.map} · ${formatDateTime(t.startsAt)}`,
-    `Prize pool ${formatMoney(t.prizePool)} · ${formatMoney(t.perKill)} per kill · Entry ${formatEntry(t.entryFee)}`,
-    `${slotsLeft(t)} slots left. Join on ${APP_NAME}!`,
+    `🔥 ${t.title.toUpperCase()} 🔥`,
+    `🎮 Free Fire ${MODE_LABEL[t.mode]} · ${MAP_LABEL[t.map]}`,
+    `📅 ${formatDateTime(t.startsAt)}`,
+    `🏆 Prize pool ${formatMoney(t.prizePool)}${t.perKillReward ? ` + ${formatMoney(t.perKillReward)}/kill` : ''}`,
+    `🎟️ Entry: ${formatEntry(t.entryFee)} · ${t.teamsLeft} ${teamWord(t, t.teamsLeft)} left`,
+    `👉 Register your ${teamWord(t, 1)} in the ${APP_NAME} app`,
+    ...(channelUrl ? [`📢 Updates: ${channelUrl}`] : []),
   ].join('\n');
 }

@@ -1,19 +1,45 @@
 import { Router } from 'express';
 
 import { currentUser, requireAuth, requireRole } from '../../middlewares/auth.js';
-import { authAccountLimiter, authIpLimiter } from '../../middlewares/rateLimiter.js';
+import { otpPhoneLimiter, otpRequestIpLimiter, otpVerifyIpLimiter } from '../../middlewares/rateLimiter.js';
 import { parseInput } from '../../utils/errors.js';
-import { banSchema, freeFireUidSchema, kycSchema, loginSchema, registerSchema, userIdParams } from './auth.schema.js';
-import { getProfile, login, register, setBanned, setFreeFireUid, setKycStatus, verifyFreeFireUid } from './auth.service.js';
+import {
+  banSchema,
+  kycSchema,
+  listUsersQuery,
+  requestOtpSchema,
+  updateProfileSchema,
+  userIdParams,
+  verifyOtpSchema,
+} from './auth.schema.js';
+import {
+  getProfile,
+  listUsers,
+  requestOtp,
+  setBanned,
+  setKycStatus,
+  signOutEverywhere,
+  updateProfile,
+  verifyOtp,
+} from './auth.service.js';
 
 export const authRouter = Router();
 
-authRouter.post('/register', authIpLimiter, async (req, res) => {
-  res.status(201).json(await register(parseInput(registerSchema, req.body)));
+/** Step 1: send a 6-digit code to the phone number. */
+authRouter.post('/otp/request', otpRequestIpLimiter, otpPhoneLimiter, async (req, res) => {
+  const { phone } = parseInput(requestOtpSchema, req.body);
+  res.json(await requestOtp(phone, req.ip));
 });
 
-authRouter.post('/login', authIpLimiter, authAccountLimiter, async (req, res) => {
-  res.json(await login(parseInput(loginSchema, req.body)));
+/** Step 2: exchange the code for an access token. Creates the account on first sign-in. */
+authRouter.post('/otp/verify', otpVerifyIpLimiter, otpPhoneLimiter, async (req, res) => {
+  const { phone, code } = parseInput(verifyOtpSchema, req.body);
+  res.json(await verifyOtp(phone, code));
+});
+
+authRouter.post('/sign-out-everywhere', requireAuth, async (req, res) => {
+  await signOutEverywhere(currentUser(req).id);
+  res.json({ signedOut: true });
 });
 
 export const usersRouter = Router();
@@ -22,14 +48,15 @@ usersRouter.get('/me', requireAuth, async (req, res) => {
   res.json(await getProfile(currentUser(req).id));
 });
 
-usersRouter.put('/me/free-fire-uid', requireAuth, async (req, res) => {
-  const { freeFireUid } = parseInput(freeFireUidSchema, req.body);
-  res.json({ user: await setFreeFireUid(currentUser(req).id, freeFireUid) });
+usersRouter.patch('/me', requireAuth, async (req, res) => {
+  const { displayName } = parseInput(updateProfileSchema, req.body);
+  res.json(await updateProfile(currentUser(req).id, displayName));
 });
 
-usersRouter.post('/:id/verify-uid', requireAuth, requireRole('admin'), async (req, res) => {
-  const { id } = parseInput(userIdParams, req.params);
-  res.json({ user: await verifyFreeFireUid(currentUser(req).id, id) });
+// Admin only.
+
+usersRouter.get('/', requireAuth, requireRole('admin'), async (req, res) => {
+  res.json({ users: await listUsers(parseInput(listUsersQuery, req.query)) });
 });
 
 usersRouter.put('/:id/kyc', requireAuth, requireRole('admin'), async (req, res) => {

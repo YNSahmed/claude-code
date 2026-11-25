@@ -28,7 +28,7 @@ const razorpay: PaymentGateway = {
       response = await fetch('https://api.razorpay.com/v1/orders', {
         method: 'POST',
         headers: {
-          Authorization: `Basic ${Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64')}`,
+          Authorization: `Basic ${Buffer.from(`${env.RAZORPAY_KEY_ID ?? ''}:${env.RAZORPAY_KEY_SECRET ?? ''}`).toString('base64')}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ amount: amountPaise, currency: 'INR', receipt }),
