@@ -9,12 +9,15 @@ import type { User } from '@/api/types';
 import { useAuth } from '@/auth/auth-context';
 import { Logo } from '@/components/brand';
 import { LegalLinks } from '@/components/legal-links';
+import { AgreementNotice } from '@/components/legal-notice';
 import { PhoneField, phoneError } from '@/components/phone-field';
 import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Screen } from '@/components/ui/screen';
 import { Colors, Fonts, Gradients, Radius, type IconName } from '@/constants/theme';
+import { MINIMUM_AGE } from '@/constants/business';
 import { haptics } from '@/utils/device';
 import { formatPhone } from '@/utils/format';
 
@@ -45,6 +48,9 @@ export default function SignInScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [resendIn, setResendIn] = useState(0);
+  // Age check comes first, before we collect the phone number. Starts unticked.
+  const [isAdult, setIsAdult] = useState(false);
+  const [ageError, setAgeError] = useState(false);
   const codeInput = useRef<ComponentRef<typeof TextInput>>(null);
 
   useEffect(() => {
@@ -56,6 +62,11 @@ export default function SignInScreen() {
   const phone = `+91${digits}`;
 
   const sendCode = async () => {
+    if (!isAdult) {
+      setAgeError(true);
+      haptics.warning();
+      return;
+    }
     const invalid = phoneError(digits);
     if (invalid) {
       setError(invalid);
@@ -66,7 +77,7 @@ export default function SignInScreen() {
     try {
       const result = await api<{ resendInSeconds: number }>('/auth/otp/request', {
         method: 'POST',
-        body: { phone },
+        body: { phone, confirmedAdult: true },
       });
       setStep('code');
       setCode('');
@@ -97,7 +108,7 @@ export default function SignInScreen() {
     try {
       const result = await api<{ accessToken: string; user: User }>('/auth/otp/verify', {
         method: 'POST',
-        body: { phone, code: value },
+        body: { phone, code: value, confirmedAdult: true },
       });
       haptics.success();
       await signIn(result.accessToken, result.user);
@@ -168,6 +179,22 @@ export default function SignInScreen() {
               error={error}
               autoFocus
             />
+            <Checkbox
+              checked={isAdult}
+              onChange={(value) => {
+                setIsAdult(value);
+                setAgeError(false);
+                setError(null);
+              }}
+              label={`I am ${MINIMUM_AGE} or older`}
+              error={ageError}
+            />
+            {ageError ? (
+              <AppText variant="caption" color={Colors.danger}>
+                Clutch Arena is only for players aged {MINIMUM_AGE} or older.
+              </AppText>
+            ) : null}
+            <AgreementNotice action="tapping Send code" />
             <Button
               title={busy ? 'Sending…' : 'Send code'}
               icon="chatbubble-ellipses"

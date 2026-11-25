@@ -2,16 +2,18 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { ApiError, errorMessage, newIdempotencyKey } from '@/api/client';
 import { useMySquad, useRegisterSquad, useTournament } from '@/api/queries';
 import { useAuth } from '@/auth/auth-context';
+import { LegalLink } from '@/components/legal-notice';
 import { PhoneField, phoneError } from '@/components/phone-field';
 import { AppText } from '@/components/ui/app-text';
 import { ModeBadge } from '@/components/ui/badges';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Screen, ScreenHeader } from '@/components/ui/screen';
 import { TextField } from '@/components/ui/text-field';
@@ -254,32 +256,19 @@ export default function RegisterSquadScreen() {
         </MemberCard>
       ))}
 
-      <Pressable
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: consent }}
-        onPress={() => {
-          setConsent(!consent);
-          haptics.select();
-        }}
-        style={styles.consent}>
-        <View
-          style={[
-            styles.checkbox,
-            consent && styles.checkboxOn,
-            submitted && !consent && styles.checkboxError,
-          ]}>
-          {consent ? <Ionicons name="checkmark" size={16} color={Colors.background} /> : null}
-        </View>
-        <AppText variant="caption" color={Colors.text} style={styles.flex}>
-          My teammates agreed to share their name and number with the organizer for this tournament.
-        </AppText>
-      </Pressable>
+      <Checkbox
+        checked={consent}
+        onChange={setConsent}
+        label="My teammates are 18 or older and agreed to share their name and mobile number with Clutch Arena for this tournament."
+        error={submitted && !consent}
+      />
 
       <View style={styles.privacy}>
         <Ionicons name="lock-closed" size={14} color={Colors.textFaint} />
         <AppText variant="caption" color={Colors.textFaint} style={styles.flex}>
-          Numbers are encrypted and only visible to you and the organizer. Other players only see
-          your squad name. Teammates can sign in with their number to see the room details too.
+          Only you (the captain) and the organizer can see these numbers. Other players see just
+          your squad name. Teammates can sign in with their own number to see the room details. Read
+          our <LegalLink doc="privacy">Privacy Policy</LegalLink>.
         </AppText>
       </View>
     </Screen>
@@ -349,27 +338,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-  },
-  consent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxOn: {
-    backgroundColor: Colors.live,
-    borderColor: Colors.live,
-  },
-  checkboxError: {
-    borderColor: Colors.danger,
   },
   privacy: {
     flexDirection: 'row',

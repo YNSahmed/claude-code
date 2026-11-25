@@ -2,13 +2,18 @@ import { z } from 'zod';
 
 import { indianMobileSchema } from '../../utils/pii.js';
 
+/** Clutch Arena is for adults only: the player confirms they are 18+ before their number is collected. */
+const confirmedAdult = z.literal(true, 'Clutch Arena is only for players aged 18 or older.');
+
 export const requestOtpSchema = z.strictObject({
   phone: indianMobileSchema,
+  confirmedAdult,
 });
 
 export const verifyOtpSchema = z.strictObject({
   phone: indianMobileSchema,
   code: z.string().trim().regex(/^[0-9]{6}$/, 'Enter the 6-digit code.'),
+  confirmedAdult,
 });
 
 export const updateProfileSchema = z.strictObject({

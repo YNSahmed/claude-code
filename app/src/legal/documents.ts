@@ -50,6 +50,7 @@ const privacy: LegalDoc = {
             'Your display name, shown to you and, if you are in a squad, to your squad.',
             'Squad registrations: the squad name, and for each member their name, mobile number and (optionally) Free Fire UID.',
             "Results: your squad's placement and kills.",
+            'That you confirmed you are 18 or older and, for captains, that your teammates are 18 or older and agreed to share their details, with the time you confirmed.',
             'Login codes. We store only a scrambled version (a hash), never the code itself, and delete it after [1 day].',
             'Your IP address, briefly, to stop abuse such as someone requesting many login codes.',
             'Entry fee payments you make by UPI: the payer name, UPI ID and transaction reference your UPI app shows us. Payments happen in your UPI app, not in ours.',

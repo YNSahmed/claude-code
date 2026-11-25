@@ -126,10 +126,11 @@ export async function verifyOtp(phone: string, code: string) {
 
     const role: Role = env.ADMIN_PHONES.includes(phone) ? 'admin' : 'player';
     const { rows: users } = await client.query<UserRow & { inserted: boolean }>(
-      `INSERT INTO users (phone, role, phone_verified_at)
-       VALUES ($1, $2, now())
+      `INSERT INTO users (phone, role, phone_verified_at, age_confirmed_at)
+       VALUES ($1, $2, now(), now())
        ON CONFLICT (phone) DO UPDATE
          SET phone_verified_at = COALESCE(users.phone_verified_at, now()),
+             age_confirmed_at = COALESCE(users.age_confirmed_at, now()),
              role = CASE WHEN $2 = 'admin' THEN 'admin' ELSE users.role END
        RETURNING *, (xmax = 0) AS inserted`,
       [phone, role]

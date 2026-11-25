@@ -89,8 +89,8 @@ export const registerSquadSchema = z.strictObject({
   captain: z.strictObject({ name: personName, freeFireUid }),
   /** Everyone else in the team: 3 for a squad, 1 for a duo, none for solo. */
   teammates: z.array(z.strictObject({ name: personName, phone: indianMobileSchema, freeFireUid })).max(3),
-  /** The captain confirms their teammates agreed to share their name and number with the organizer. */
-  consent: z.literal(true, 'Confirm your teammates agreed to share their details.'),
+  /** The captain confirms their teammates are 18+ and agreed to share their name and number. Recorded on the squad. */
+  consent: z.literal(true, 'Confirm your teammates are 18 or older and agreed to share their details.'),
 });
 
 export const removeSquadSchema = z.strictObject({
