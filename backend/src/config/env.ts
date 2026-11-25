@@ -1,0 +1,114 @@
+import { config } from 'dotenv';
+import { z } from 'zod';
+
+config({ quiet: true });
+
+const boolean = z.enum(['true', 'false']).transform((value) => value === 'true');
+const tokens = z.coerce.number().int().nonnegative();
+const hexKey = z.string().regex(/^[0-9a-fA-F]{64}$/, 'must be 32 bytes of hex (openssl rand -hex 32)');
+const optional = z
+  .string()
+  .optional()
+  .transform((value) => (value ? value : undefined));
+const phoneList = z
+  .string()
+  .default('')
+  .transform((value) => value.split(',').map((p) => p.trim()).filter(Boolean))
+  .pipe(z.array(z.string().regex(/^\+91[6-9][0-9]{9}$/, 'use +91XXXXXXXXXX numbers, comma separated')));
+
+const schema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+    TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
+    /** Browser origins allowed to call the API (the web build of the app). Mobile apps need none. */
+    CORS_ORIGINS: z
+      .string()
+      .default('')
+      .transform((value) => value.split(',').map((o) => o.trim()).filter(Boolean)),
+
+    DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'must be a postgres:// connection URL'),
+    DATABASE_SSL: boolean.default(false),
+    DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+
+    JWT_SECRET: z.string().min(32, 'must be at least 32 characters'),
+    JWT_ISSUER: z.string().min(1).default('ff-arena-api'),
+    JWT_AUDIENCE: z.string().min(1).default('ff-arena-app'),
+    JWT_TTL_SECONDS: z.coerce.number().int().min(60).max(30 * 86_400).default(7 * 86_400),
+
+    /** Phone numbers that become admins (organizers) when they sign in. */
+    ADMIN_PHONES: phoneList,
+
+    ROOM_CREDENTIALS_KEY: hexKey,
+    /** Encrypts players' phone numbers at rest and keys the phone and OTP hashes. */
+    PII_ENCRYPTION_KEY: hexKey,
+
+    SMS_PROVIDER: z.enum(['console', 'msg91', 'twilio']).default('console'),
+    MSG91_AUTH_KEY: optional,
+    MSG91_TEMPLATE_ID: optional,
+    MSG91_OTP_VARIABLE: z.string().min(1).default('otp'),
+    TWILIO_ACCOUNT_SID: optional,
+    TWILIO_AUTH_TOKEN: optional,
+    /** A Twilio phone number (+1...) or Messaging Service SID (MG...). */
+    TWILIO_FROM: optional,
+    OTP_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(300),
+    OTP_MAX_ATTEMPTS: z.coerce.number().int().min(3).max(10).default(5),
+
+    REGISTRATION_CLOSE_MINUTES: z.coerce.number().int().min(0).max(1440).default(5),
+
+    // Token wallet (deposits, withdrawals). Off: registration is free and money is handled outside the app.
+    WALLET_ENABLED: boolean.default(false),
+    PAYMENT_GATEWAY: z.enum(['razorpay', 'mock']).default('razorpay'),
+    RAZORPAY_KEY_ID: optional,
+    RAZORPAY_KEY_SECRET: optional,
+    RAZORPAY_WEBHOOK_SECRET: optional,
+    MIN_DEPOSIT: tokens.min(1).default(10),
+    MAX_DEPOSIT: tokens.default(10_000),
+    MIN_WITHDRAWAL: tokens.min(1).default(100),
+    MAX_WITHDRAWAL: tokens.default(10_000),
+    TDS_RATE_BPS: z.coerce.number().int().min(0).max(10_000).default(3000),
+    WITHDRAWAL_FEE_BPS: z.coerce.number().int().min(0).max(5000).default(0),
+    ALLOW_WINNINGS_FOR_ENTRY: boolean.default(true),
+  })
+  .refine((e) => !(e.NODE_ENV === 'production' && e.SMS_PROVIDER === 'console'), {
+    message: 'the console SMS provider only logs codes and is not allowed in production',
+    path: ['SMS_PROVIDER'],
+  })
+  .refine((e) => e.SMS_PROVIDER !== 'msg91' || (e.MSG91_AUTH_KEY && e.MSG91_TEMPLATE_ID), {
+    message: 'MSG91_AUTH_KEY and MSG91_TEMPLATE_ID are required for msg91',
+    path: ['SMS_PROVIDER'],
+  })
+  .refine((e) => e.SMS_PROVIDER !== 'twilio' || (e.TWILIO_ACCOUNT_SID && e.TWILIO_AUTH_TOKEN && e.TWILIO_FROM), {
+    message: 'TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM are required for twilio',
+    path: ['SMS_PROVIDER'],
+  })
+  .refine((e) => !e.WALLET_ENABLED || (e.RAZORPAY_KEY_ID && e.RAZORPAY_KEY_SECRET && (e.RAZORPAY_WEBHOOK_SECRET?.length ?? 0) >= 16), {
+    message: 'the wallet needs RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and a RAZORPAY_WEBHOOK_SECRET of 16+ characters',
+    path: ['WALLET_ENABLED'],
+  })
+  .refine((e) => !(e.NODE_ENV === 'production' && e.PAYMENT_GATEWAY === 'mock'), {
+    message: 'the mock payment gateway is not allowed in production',
+    path: ['PAYMENT_GATEWAY'],
+  })
+  .refine((e) => e.MIN_DEPOSIT <= e.MAX_DEPOSIT && e.MIN_WITHDRAWAL <= e.MAX_WITHDRAWAL, {
+    message: 'minimums must not exceed maximums',
+    path: ['MIN_DEPOSIT'],
+  })
+  .refine((e) => e.TDS_RATE_BPS + e.WITHDRAWAL_FEE_BPS < 10_000, {
+    message: 'TDS_RATE_BPS + WITHDRAWAL_FEE_BPS must leave something to pay out',
+    path: ['TDS_RATE_BPS'],
+  });
+
+function loadEnv() {
+  const parsed = schema.safeParse(process.env);
+  if (!parsed.success) {
+    // Only names and rule messages are printed, never the values.
+    const problems = parsed.error.issues.map((issue) => `  ${issue.path.join('.') || '(root)'}: ${issue.message}`);
+    console.error(`Invalid environment configuration:\n${problems.join('\n')}`);
+    process.exit(1);
+  }
+  return Object.freeze(parsed.data);
+}
+
+export const env = loadEnv();
+export type Env = typeof env;
