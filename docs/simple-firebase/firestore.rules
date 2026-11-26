@@ -1,0 +1,109 @@
+rules_version = '2';
+
+// Clutch Arena security rules.
+// Players (no login): can read tournaments, squad names and settings, and can ADD a registration.
+// Organizer (Google sign-in with ORGANIZER_EMAIL): can read and manage everything.
+// Everything else is denied.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function isOrganizer() {
+      return request.auth != null
+        && request.auth.token.email == 'YOUR-EMAIL@gmail.com'   // <-- CHANGE THIS to your Google email
+        && request.auth.token.email_verified == true;
+    }
+    function tournamentDoc(tid) { return /databases/$(database)/documents/tournaments/$(tid); }
+    function registrationDoc(tid, rid) { return /databases/$(database)/documents/tournaments/$(tid)/registrations/$(rid); }
+    function phoneDoc(tid, phone) { return /databases/$(database)/documents/tournaments/$(tid)/phones/$(phone); }
+    function publicSquadDoc(tid, rid) { return /databases/$(database)/documents/tournaments/$(tid)/publicSquads/$(rid); }
+    function isPhone(p) { return p is string && p.matches('^[6-9][0-9]{9}$'); }
+    function isText(t, min, max) { return t is string && t.size() >= min && t.size() <= max; }
+    function isUid(u) { return u is string && (u == '' || u.matches('^[0-9]{6,12}$')); }
+    function isMember(m) {
+      return m is map
+        && m.keys().hasAll(['name', 'phone', 'uid']) && m.keys().hasOnly(['name', 'phone', 'uid'])
+        && isText(m.name, 2, 32) && isPhone(m.phone) && isUid(m.uid);
+    }
+    function phonesDistinct(ms) {
+      return ms[0].phone != ms[1].phone && ms[0].phone != ms[2].phone && ms[0].phone != ms[3].phone
+        && ms[1].phone != ms[2].phone && ms[1].phone != ms[3].phone && ms[2].phone != ms[3].phone;
+    }
+    function isRegistration(d) {
+      return d.keys().hasAll(['squadName', 'teamNumber', 'members', 'adult', 'consent', 'paymentStatus', 'createdAt'])
+        && d.keys().hasOnly(['squadName', 'teamNumber', 'members', 'adult', 'consent', 'paymentStatus', 'createdAt'])
+        && isText(d.squadName, 2, 24)
+        && d.teamNumber is int
+        && d.members is list && d.members.size() == 4
+        && isMember(d.members[0]) && isMember(d.members[1]) && isMember(d.members[2]) && isMember(d.members[3])
+        && phonesDistinct(d.members)
+        && d.adult == true && d.consent == true
+        && d.paymentStatus == 'unpaid'
+        && d.createdAt == request.time;
+    }
+
+    // ---------- public settings (organizer edits) ----------
+    match /config/settings {
+      allow read: if true;
+      allow write: if isOrganizer();
+    }
+
+    // ---------- tournaments ----------
+    match /tournaments/{tid} {
+      allow read: if true;
+      allow create, delete: if isOrganizer();
+      // Players may only bump the counters, by exactly one, together with a new registration.
+      allow update: if isOrganizer() || (
+        resource.data.status == 'OPEN'
+        && request.time < resource.data.startsAt
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['squadsRegistered', 'nextTeamNumber', 'lastRegistrationId'])
+        && request.resource.data.squadsRegistered == resource.data.squadsRegistered + 1
+        && request.resource.data.squadsRegistered <= resource.data.maxSquads
+        && request.resource.data.nextTeamNumber == resource.data.nextTeamNumber + 1
+        && request.resource.data.lastRegistrationId is string
+        && !exists(registrationDoc(tid, request.resource.data.lastRegistrationId))
+        && existsAfter(registrationDoc(tid, request.resource.data.lastRegistrationId))
+      );
+
+      // Private: squad members' names and phone numbers. Only the organizer can read them.
+      match /registrations/{rid} {
+        allow read, update, delete: if isOrganizer();
+        allow create: if isRegistration(request.resource.data)
+          && get(tournamentDoc(tid)).data.status == 'OPEN'
+          && request.time < get(tournamentDoc(tid)).data.startsAt
+          && request.resource.data.teamNumber == get(tournamentDoc(tid)).data.nextTeamNumber
+          && getAfter(tournamentDoc(tid)).data.lastRegistrationId == rid
+          && existsAfter(phoneDoc(tid, request.resource.data.members[0].phone))
+          && existsAfter(phoneDoc(tid, request.resource.data.members[1].phone))
+          && existsAfter(phoneDoc(tid, request.resource.data.members[2].phone))
+          && existsAfter(phoneDoc(tid, request.resource.data.members[3].phone))
+          && existsAfter(publicSquadDoc(tid, rid));
+      }
+
+      // One document per phone number: a number can be in only one squad per tournament.
+      // Create-only (a second create of the same number fails). Not readable by players.
+      match /phones/{phone} {
+        allow read, delete: if isOrganizer();
+        allow create: if isPhone(phone)
+          && request.resource.data.keys().hasOnly(['registrationId'])
+          && request.resource.data.registrationId is string
+          && (getAfter(registrationDoc(tid, request.resource.data.registrationId)).data.members[0].phone == phone
+           || getAfter(registrationDoc(tid, request.resource.data.registrationId)).data.members[1].phone == phone
+           || getAfter(registrationDoc(tid, request.resource.data.registrationId)).data.members[2].phone == phone
+           || getAfter(registrationDoc(tid, request.resource.data.registrationId)).data.members[3].phone == phone);
+      }
+
+      // Public: just the squad name and team number, so everyone can see who's in.
+      match /publicSquads/{rid} {
+        allow read: if true;
+        allow update, delete: if isOrganizer();
+        allow create: if request.resource.data.keys().hasOnly(['squadName', 'teamNumber'])
+          && request.resource.data.squadName == getAfter(registrationDoc(tid, rid)).data.squadName
+          && request.resource.data.teamNumber == getAfter(registrationDoc(tid, rid)).data.teamNumber;
+      }
+    }
+
+    // Anything not listed above is denied.
+  }
+}
