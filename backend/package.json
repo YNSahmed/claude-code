@@ -2,7 +2,7 @@
   "name": "ff-arena-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Free Fire tournament platform API with an atomic token wallet (1 token = ₹1).",
+  "description": "Free Fire tournament platform API with an atomic token wallet (1 token = \u20b91).",
   "type": "module",
   "engines": {
     "node": ">=20.11"
@@ -12,7 +12,8 @@
     "build": "tsc",
     "start": "node dist/src/server.js",
     "migrate": "tsx scripts/migrate.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start:prod": "node dist/scripts/migrate.js && node dist/src/server.js"
   },
   "dependencies": {
     "cors": "^2.8.6",

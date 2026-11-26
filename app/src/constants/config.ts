@@ -1,12 +1,20 @@
+import { Platform } from 'react-native';
+
 import type { GameMap, Mode } from '@/api/types';
 
 export const APP_NAME = 'Clutch Arena';
 
-/** The backend URL. Set EXPO_PUBLIC_API_URL in app/.env (see .env.example). */
-export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(
-  /\/$/,
-  ''
-);
+/**
+ * The backend URL, from EXPO_PUBLIC_API_URL (see .env.example).
+ * - Phone builds need the full address, e.g. https://clutch-arena.onrender.com.
+ * - The web build served by the backend itself sets it to "" and calls its own address.
+ */
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL;
+export const API_URL = (
+  configuredApiUrl !== undefined && (configuredApiUrl !== '' || Platform.OS === 'web')
+    ? configuredApiUrl
+    : 'http://localhost:4000'
+).replace(/\/$/, '');
 
 export const CURRENCY_SYMBOL = '₹';
 

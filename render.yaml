@@ -1,0 +1,46 @@
+# One-click hosting for Clutch Arena on Render. See DEPLOY.md for the steps.
+# Creates a PostgreSQL database and one web service that runs the API and serves the web app.
+# Blueprint reference: https://render.com/docs/blueprint-spec
+
+databases:
+  - name: clutch-arena-db
+    plan: free # Free databases expire after 30 days. Upgrade in the Render dashboard before launch.
+    databaseName: clutch_arena
+    user: clutch_arena
+    ipAllowList: [] # Only the Clutch Arena service can connect; closed to the internet.
+
+services:
+  - type: web
+    name: clutch-arena
+    runtime: node
+    plan: free # Free servers sleep after 15 idle minutes (first visit then takes about a minute). Choose Starter to stay on.
+    buildCommand: >-
+      cd app && npm ci && EXPO_PUBLIC_API_URL= CI=1 npx expo export --platform web --output-dir dist &&
+      cd ../backend && npm ci --include=dev && npm run build
+    startCommand: cd backend && npm run start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # TEST MODE: login codes are written to this service's Logs tab instead of being texted.
+      # To go live, set NODE_ENV=production and SMS_PROVIDER=msg91 (see DEPLOY.md).
+      - key: NODE_ENV
+        value: development
+      - key: SMS_PROVIDER
+        value: console
+      - key: ADMIN_PHONES
+        sync: false # Render asks for your number (+91XXXXXXXXXX) when you create the Blueprint.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: clutch-arena-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ROOM_CREDENTIALS_KEY
+        generateValue: true
+      - key: PII_ENCRYPTION_KEY
+        generateValue: true # Keep this value safe: if it is lost, saved phone numbers can't be read.
+      - key: TRUST_PROXY
+        value: "1"
+      - key: WEB_APP_DIR
+        value: ../app/dist

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
+import path from 'node:path';
 
 import cors from 'cors';
 import express, { type Express, type Request } from 'express';
@@ -24,8 +26,8 @@ export function createApp(): Express {
   app.use((req, res, next) => {
     req.requestId = randomUUID();
     res.set('X-Request-Id', req.requestId);
-    // API responses (balances, room passwords) must never be cached by proxies or the client.
-    res.set('Cache-Control', 'no-store');
+    // API responses (room passwords, personal data) must never be cached by proxies or the client.
+    if (req.path.startsWith('/api/') || req.path === '/health') res.set('Cache-Control', 'no-store');
     next();
   });
 
@@ -57,6 +59,25 @@ export function createApp(): Express {
   app.use('/api/v1/tournaments', tournamentRouter);
   // The token wallet stays switched off unless WALLET_ENABLED=true (registration is free).
   if (env.WALLET_ENABLED) app.use('/api/v1/wallet', walletRouter);
+
+  // The web version of the app (an Expo web export), served from the same address as the API.
+  const webDir = env.WEB_APP_DIR ? path.resolve(process.cwd(), env.WEB_APP_DIR) : null;
+  if (webDir && existsSync(path.join(webDir, 'index.html'))) {
+    app.use(
+      express.static(webDir, {
+        index: false,
+        setHeaders: (res, filePath) => {
+          // File names under _expo/static contain a content hash, so they can be cached for a year.
+          res.set('Cache-Control', filePath.includes(`${path.sep}_expo${path.sep}static${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache');
+        },
+      })
+    );
+    // Every other page (/, /tournament/..., /legal/privacy) is handled by the app's own router.
+    app.get(/^(?!\/api\/).*/, (_req, res) => {
+      res.set('Cache-Control', 'no-cache');
+      res.sendFile(path.join(webDir, 'index.html'));
+    });
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);
